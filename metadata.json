@@ -1,0 +1,5 @@
+{
+  "name": "FleetMaster AI",
+  "description": "A comprehensive fleet management system for tracking vehicles, fuel consumption, maintenance, workers, and project assignments with advanced loan tracking and visual statistics.",
+  "requestFramePermissions": []
+}
