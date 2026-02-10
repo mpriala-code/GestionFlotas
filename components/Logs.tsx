@@ -13,10 +13,9 @@ import {
   MapPin,
   Calendar,
   Clock,
-  Info,
-  Fingerprint
+  HardHat
 } from 'lucide-react';
-import { LogEntry, Vehicle, Worker, Work, TripType } from '../types';
+import { LogEntry, Vehicle, Worker, Work, TripType, WorkStatus } from '../types';
 
 interface LogsProps {
   logs: LogEntry[];
@@ -81,7 +80,7 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
     if (formData.vehicleId && formData.startKm !== undefined && formData.endKm !== undefined) {
       const v = vehicles.find(v => v.id === formData.vehicleId);
       if (v) {
-        const distance = formData.endKm - formData.startKm;
+        const distance = (formData.endKm || 0) - (formData.startKm || 0);
         if (distance >= 0) {
           const adjustedConsumption = v.baseConsumption * (1 + v.wearFactor / 100);
           const fuel = (distance / 100) * adjustedConsumption;
@@ -141,6 +140,8 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
       setLogs(prev => prev.filter(l => l.id !== id));
     }
   };
+
+  const activeWorks = works.filter(w => w.status === WorkStatus.ACTIVE);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -223,7 +224,7 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
                         <span className="font-medium text-slate-300">{w?.name || 'Desconocido'}</span>
                       </div>
                       <div className="flex items-center gap-2 text-slate-500 text-xs mt-1">
-                        <MapPin className="w-3 h-3" />
+                        <MapPin className="w-3 h-3 text-blue-500" />
                         <span className="truncate max-w-[150px]">{o?.name || 'Ruta libre'}</span>
                       </div>
                     </td>
@@ -254,7 +255,7 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
               })}
               {logs.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-6 py-16 text-center text-slate-500 italic">No hay registros de viajes todavía.</td>
+                  <td colSpan={isAdmin ? 6 : 5} className="px-6 py-16 text-center text-slate-500 italic">No hay registros de viajes todavía.</td>
                 </tr>
               )}
             </tbody>
@@ -281,7 +282,7 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
                   <input type="time" required value={formData.time} onChange={e => setFormData({...formData, time: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 outline-none" />
                 </div>
                 <div className="space-y-1 col-span-2 md:col-span-1">
-                  <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Tipo</label>
+                  <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Tipo Trayecto</label>
                   <select required value={formData.tripType} onChange={e => setFormData({...formData, tripType: e.target.value as TripType})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 outline-none">
                     {Object.values(TripType).map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
@@ -291,46 +292,73 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Vehículo</label>
-                  <select required value={formData.vehicleId} onChange={e => setFormData({...formData, vehicleId: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 outline-none">
+                  <select required value={formData.vehicleId} onChange={e => setFormData({...formData, vehicleId: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 outline-none focus:ring-1 focus:ring-blue-500">
                     <option value="">Seleccionar vehículo...</option>
                     {vehicles.map(v => <option key={v.id} value={v.id}>{v.plate} - {v.model}</option>)}
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Conductor</label>
-                  <select 
-                    required 
-                    disabled={!!currentUser}
-                    value={formData.workerId} 
-                    onChange={e => setFormData({...formData, workerId: e.target.value})} 
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 outline-none disabled:opacity-50"
-                  >
-                    <option value="">Seleccionar conductor...</option>
-                    {workers.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                  <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Proyecto / Obra</label>
+                  <select required value={formData.workId} onChange={e => setFormData({...formData, workId: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 outline-none focus:ring-1 focus:ring-blue-500">
+                    <option value="">Seleccionar obra...</option>
+                    {activeWorks.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                    {works.filter(w => w.status !== WorkStatus.ACTIVE).length > 0 && <optgroup label="Completadas">
+                      {works.filter(w => w.status !== WorkStatus.ACTIVE).map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                    </optgroup>}
                   </select>
                 </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Conductor</label>
+                <select 
+                  required 
+                  disabled={!!currentUser}
+                  value={formData.workerId} 
+                  onChange={e => setFormData({...formData, workerId: e.target.value})} 
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 outline-none disabled:opacity-50"
+                >
+                  <option value="">Seleccionar conductor...</option>
+                  {workers.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                </select>
               </div>
 
               <div className="bg-slate-800/40 p-6 rounded-3xl border border-slate-700">
                 <div className="grid grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <label className="text-[10px] text-blue-400 font-bold uppercase tracking-widest">KM Inicio</label>
-                    <input type="number" required value={formData.startKm} onChange={e => setFormData({...formData, startKm: parseInt(e.target.value)})} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-2xl font-bold outline-none" />
+                    <input type="number" required value={formData.startKm} onChange={e => setFormData({...formData, startKm: parseInt(e.target.value)})} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-2xl font-bold outline-none focus:ring-1 focus:ring-blue-500" />
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] text-blue-400 font-bold uppercase tracking-widest">KM Fin</label>
-                    <input type="number" required value={formData.endKm} onChange={e => setFormData({...formData, endKm: parseInt(e.target.value)})} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-2xl font-bold outline-none" />
+                    <input type="number" required value={formData.endKm} onChange={e => setFormData({...formData, endKm: parseInt(e.target.value)})} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-2xl font-bold outline-none focus:ring-1 focus:ring-blue-500" />
                   </div>
                 </div>
-                <div className="mt-4 flex justify-between">
-                  <p className="text-xs text-slate-400">Distancia: <span className="text-blue-400 font-bold">{formData.distance} km</span></p>
-                  <p className="text-xs text-slate-400">Consumo: <span className="text-green-400 font-bold">{formData.fuelConsumed} L</span></p>
+                <div className="mt-4 flex justify-between px-2">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-blue-500" />
+                    <p className="text-xs text-slate-400">Distancia: <span className="text-blue-400 font-bold">{formData.distance} km</span></p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Fuel className="w-4 h-4 text-green-500" />
+                    <p className="text-xs text-slate-400">Consumo: <span className="text-green-400 font-bold">{formData.fuelConsumed} L</span></p>
+                  </div>
                 </div>
               </div>
 
+              <div className="space-y-1">
+                <label className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Notas / Observaciones</label>
+                <textarea 
+                  value={formData.notes} 
+                  onChange={e => setFormData({...formData, notes: e.target.value})} 
+                  placeholder="Ej: Tráfico denso, carga pesada..."
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 outline-none focus:ring-1 focus:ring-blue-500 h-20 resize-none"
+                />
+              </div>
+
               <div className="flex gap-4">
-                <button type="button" onClick={() => setShowModal(false)} className="flex-1 bg-slate-800 py-4 rounded-2xl">Cancelar</button>
-                <button type="submit" className="flex-1 bg-blue-600 py-4 rounded-2xl font-bold">Guardar Viaje</button>
+                <button type="button" onClick={() => setShowModal(false)} className="flex-1 bg-slate-800 py-4 rounded-2xl hover:bg-slate-700 transition-colors">Cancelar</button>
+                <button type="submit" className="flex-1 bg-blue-600 py-4 rounded-2xl font-bold hover:bg-blue-500 transition-colors shadow-lg shadow-blue-600/20">Guardar Viaje</button>
               </div>
             </form>
           </div>
