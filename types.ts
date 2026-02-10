@@ -21,7 +21,8 @@ export type AuthRole = 'none' | 'worker' | 'admin';
 
 export interface PriceRecord {
   id: string;
-  date: string; // Starting date for this price
+  date: string; // Effective starting date
+  endDate?: string; // Optional ending date for the interval
   fuelPrice: number; // EUR per Liter
   costPerKm: number; // Extra operational cost per KM
 }

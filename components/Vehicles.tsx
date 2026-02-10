@@ -1,7 +1,9 @@
 
-import React, { useState } from 'react';
-import { Plus, Edit2, Trash2, Search, Info, Euro, Calendar, Gauge, FileText, Shield, Wrench, ChevronDown, ChevronUp } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Plus, Edit2, Trash2, Search, Info, Euro, Calendar, Gauge, FileText, Shield, Wrench, ChevronDown, ChevronUp, FileDown, FileUp } from 'lucide-react';
 import { Vehicle, MaintenanceStatus } from '../types';
+
+declare const XLSX: any;
 
 interface VehiclesProps {
   vehicles: Vehicle[];
@@ -14,6 +16,7 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
   const [showModal, setShowModal] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState<Partial<Vehicle>>({
     plate: '',
@@ -60,6 +63,7 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
       const newVehicle = {
         ...formData as Vehicle,
         id: Math.random().toString(36).substr(2, 9),
+        maintenanceHistory: []
       };
       setVehicles(prev => [...prev, newVehicle]);
     }
@@ -109,11 +113,111 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
     setExpandedId(expandedId === id ? null : id);
   };
 
+  // EXCEL EXPORT
+  const handleExport = () => {
+    const exportData = vehicles.map(v => ({
+      'Matrícula': v.plate,
+      'Modelo': v.model,
+      'Tipo': v.type,
+      'VIN': v.vin,
+      'Año': v.year,
+      'Kilómetros': v.kilometers,
+      'Consumo Base': v.baseConsumption,
+      'Factor Desgaste': v.wearFactor,
+      'Fecha ITV': v.itvDate,
+      'Vencimiento Seguro': v.insuranceExpiry,
+      'Coste Seguro': v.insuranceCost,
+      'Fecha Impuesto': v.taxDate,
+      'Importe Impuesto': v.taxAmount,
+      'Próximo Pago Gral': v.nextGeneralPayment,
+      'Próximo Manto': v.nextMaintenance,
+      'Estado Manto': v.maintStatus,
+      'Préstamo Activo': v.loan.active ? 'SÍ' : 'NO',
+      'Total Préstamo': v.loan.totalAmount,
+      'Cuota Mensual': v.loan.monthlyFee,
+      'Pendiente Préstamo': v.loan.remainingAmount
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Vehículos");
+    XLSX.writeFile(wb, `Flota_Vehiculos_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  // EXCEL IMPORT
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(ws);
+
+        const newVehicles: Vehicle[] = data.map((row: any) => {
+          // Attempt to find existing by plate to keep ID
+          const existing = vehicles.find(v => v.plate === row['Matrícula']);
+          return {
+            id: existing?.id || Math.random().toString(36).substr(2, 9),
+            plate: row['Matrícula'] || '',
+            model: row['Modelo'] || '',
+            type: row['Tipo'] || 'Furgoneta',
+            vin: row['VIN'] || '',
+            year: parseInt(row['Año']) || new Date().getFullYear(),
+            kilometers: parseInt(row['Kilómetros']) || 0,
+            baseConsumption: parseFloat(row['Consumo Base']) || 0,
+            wearFactor: parseFloat(row['Factor Desgaste']) || 0,
+            purchaseDate: existing?.purchaseDate || '',
+            taxDate: row['Fecha Impuesto'] || '',
+            taxAmount: parseFloat(row['Importe Impuesto']) || 0,
+            nextGeneralPayment: row['Próximo Pago Gral'] || '',
+            insuranceCost: parseFloat(row['Coste Seguro']) || 0,
+            insuranceExpiry: row['Vencimiento Seguro'] || '',
+            itvDate: row['Fecha ITV'] || '',
+            lastMaintenance: existing?.lastMaintenance || '',
+            nextMaintenance: row['Próximo Manto'] || '',
+            maintStatus: (row['Estado Manto'] as MaintenanceStatus) || MaintenanceStatus.UP_TO_DATE,
+            maintNotes: row['Notas Manto'] || existing?.maintNotes || '',
+            maintenanceHistory: existing?.maintenanceHistory || [],
+            loan: {
+              active: row['Préstamo Activo'] === 'SÍ',
+              totalAmount: parseFloat(row['Total Préstamo']) || 0,
+              monthlyFee: parseFloat(row['Cuota Mensual']) || 0,
+              startDate: existing?.loan?.startDate || '',
+              endDate: existing?.loan?.endDate || '',
+              remainingAmount: parseFloat(row['Pendiente Préstamo']) || 0
+            }
+          };
+        });
+
+        if (newVehicles.length > 0) {
+          setVehicles(prev => {
+            const updated = [...prev];
+            newVehicles.forEach(nv => {
+              const idx = updated.findIndex(uv => uv.plate === nv.plate);
+              if (idx !== -1) updated[idx] = nv;
+              else updated.push(nv);
+            });
+            return updated;
+          });
+          alert(`${newVehicles.length} vehículos procesados.`);
+        }
+      } catch (err) {
+        alert("Error al importar el archivo Excel.");
+      }
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+    reader.readAsBinaryString(file);
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
         <h2 className="text-2xl font-bold">Gestión de Flota</h2>
-        <div className="flex items-center gap-4 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto">
           <div className="relative flex-1 sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
             <input 
@@ -124,14 +228,33 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
               className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm"
             />
           </div>
+          
+          <button 
+            onClick={handleExport}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl font-bold transition-all border border-slate-700 text-sm"
+          >
+            <FileDown className="w-4 h-4 text-blue-400" />
+            Exportar
+          </button>
+
           {isAdmin && (
-            <button 
-              onClick={() => setShowModal(true)}
-              className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-xl flex items-center gap-2 font-bold transition-all shadow-lg shadow-blue-600/20"
-            >
-              <Plus className="w-5 h-5" />
-              Añadir
-            </button>
+            <>
+              <input type="file" ref={fileInputRef} onChange={handleImport} className="hidden" accept=".xlsx, .xls" />
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl font-bold transition-all border border-slate-700 text-sm"
+              >
+                <FileUp className="w-4 h-4 text-green-400" />
+                Importar
+              </button>
+              <button 
+                onClick={() => setShowModal(true)}
+                className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-xl flex items-center gap-2 font-bold transition-all shadow-lg shadow-blue-600/20"
+              >
+                <Plus className="w-5 h-5" />
+                Añadir
+              </button>
+            </>
           )}
         </div>
       </div>

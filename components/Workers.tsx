@@ -1,7 +1,9 @@
 
-import React, { useState } from 'react';
-import { Plus, User, Briefcase, Trash2, Edit2 } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Plus, User, Briefcase, Trash2, Edit2, FileDown, FileUp } from 'lucide-react';
 import { Worker } from '../types';
+
+declare const XLSX: any;
 
 interface WorkersProps {
   workers: Worker[];
@@ -14,16 +16,15 @@ const Workers: React.FC<WorkersProps> = ({ workers, setWorkers, isAdmin }) => {
   const [editing, setEditing] = useState<Worker | null>(null);
   const [name, setName] = useState('');
   const [position, setPosition] = useState('');
-  // Added state for username and password to comply with Worker type
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (editing) {
       setWorkers(prev => prev.map(w => w.id === editing.id ? { ...w, name, position, username, password } : w));
     } else {
-      // Fix: Added missing 'username' and 'password' properties to the new worker object
       setWorkers(prev => [...prev, { 
         id: Math.random().toString(36).substr(2, 9), 
         name, 
@@ -39,7 +40,6 @@ const Workers: React.FC<WorkersProps> = ({ workers, setWorkers, isAdmin }) => {
     setEditing(w);
     setName(w.name);
     setPosition(w.position);
-    // Set username and password when editing to populate the form
     setUsername(w.username);
     setPassword(w.password);
     setShowModal(true);
@@ -50,7 +50,6 @@ const Workers: React.FC<WorkersProps> = ({ workers, setWorkers, isAdmin }) => {
     setEditing(null);
     setName('');
     setPosition('');
-    // Clear username and password state on modal close
     setUsername('');
     setPassword('');
   };
@@ -61,16 +60,83 @@ const Workers: React.FC<WorkersProps> = ({ workers, setWorkers, isAdmin }) => {
     }
   };
 
+  // EXPORT
+  const handleExport = () => {
+    const data = workers.map(w => ({
+      'Nombre': w.name,
+      'Puesto': w.position,
+      'Usuario': w.username,
+      'Contraseña': w.password
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Trabajadores");
+    XLSX.writeFile(wb, `Trabajadores_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  // IMPORT
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(ws);
+
+        const newWorkers: Worker[] = data.map((row: any) => ({
+          id: Math.random().toString(36).substr(2, 9),
+          name: row['Nombre'] || '',
+          position: row['Puesto'] || '',
+          username: row['Usuario'] || '',
+          password: row['Contraseña'] || '123'
+        }));
+
+        if (newWorkers.length > 0) {
+          setWorkers(prev => [...prev, ...newWorkers]);
+          alert(`${newWorkers.length} trabajadores importados.`);
+        }
+      } catch (err) {
+        alert("Error al importar el archivo.");
+      }
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+    reader.readAsBinaryString(file);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">Personal</h2>
-        {isAdmin && (
-          <button onClick={() => setShowModal(true)} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-xl flex items-center gap-2 font-bold transition-all">
-            <Plus className="w-5 h-5" />
-            Añadir Trabajador
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={handleExport}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl font-bold transition-all border border-slate-700 text-sm"
+          >
+            <FileDown className="w-4 h-4 text-blue-400" />
+            Exportar
           </button>
-        )}
+          
+          {isAdmin && (
+            <>
+              <input type="file" ref={fileInputRef} onChange={handleImport} className="hidden" accept=".xlsx, .xls" />
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl font-bold transition-all border border-slate-700 text-sm"
+              >
+                <FileUp className="w-4 h-4 text-green-400" />
+                Importar
+              </button>
+              <button onClick={() => setShowModal(true)} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-xl flex items-center gap-2 font-bold transition-all shadow-lg shadow-blue-600/20">
+                <Plus className="w-5 h-5" />
+                Añadir
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -110,7 +176,6 @@ const Workers: React.FC<WorkersProps> = ({ workers, setWorkers, isAdmin }) => {
                 <label className="block text-sm text-slate-400 mb-1">Puesto / Cargo</label>
                 <input required value={position} onChange={e => setPosition(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3" />
               </div>
-              {/* Added username and password fields to the form UI */}
               <div>
                 <label className="block text-sm text-slate-400 mb-1">Usuario</label>
                 <input required value={username} onChange={e => setUsername(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3" />

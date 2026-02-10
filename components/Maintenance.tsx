@@ -1,11 +1,13 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   Calendar, Wrench, AlertTriangle, CheckCircle2, Clock, Shield, Euro, 
-  FileText, ChevronDown, ChevronUp, History, Plus, Trash2, Save
+  FileText, ChevronDown, ChevronUp, History, Plus, Trash2, Save, FileDown, FileUp
 } from 'lucide-react';
 import { Vehicle, MaintenanceStatus, MaintenanceRecord } from '../types';
 import { Alert } from '../App';
+
+declare const XLSX: any;
 
 interface MaintenanceProps {
   vehicles: Vehicle[];
@@ -17,6 +19,7 @@ interface MaintenanceProps {
 const Maintenance: React.FC<MaintenanceProps> = ({ vehicles, setVehicles, isAdmin, alerts }) => {
   const [expandedVehicles, setExpandedVehicles] = useState<string[]>([]);
   const [showAddForm, setShowAddForm] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [newRecord, setNewRecord] = useState<Partial<MaintenanceRecord>>({
     date: new Date().toISOString().split('T')[0],
     type: 'Preventivo',
@@ -28,10 +31,6 @@ const Maintenance: React.FC<MaintenanceProps> = ({ vehicles, setVehicles, isAdmi
     setExpandedVehicles(prev => 
       prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]
     );
-  };
-
-  const updateStatus = (id: string, status: MaintenanceStatus) => {
-    setVehicles(prev => prev.map(v => v.id === id ? { ...v, maintStatus: status } : v));
   };
 
   const handleAddRecord = (vehicleId: string) => {
@@ -70,6 +69,79 @@ const Maintenance: React.FC<MaintenanceProps> = ({ vehicles, setVehicles, isAdmi
     });
   };
 
+  // EXPORT ALL HISTORY
+  const handleExportAll = () => {
+    const allHistory: any[] = [];
+    vehicles.forEach(v => {
+      (v.maintenanceHistory || []).forEach(h => {
+        allHistory.push({
+          'Matrícula': v.plate,
+          'Modelo': v.model,
+          'Fecha': h.date,
+          'Tipo': h.type,
+          'Notas': h.notes,
+          'Estado': h.statusAtTime
+        });
+      });
+    });
+    
+    const ws = XLSX.utils.json_to_sheet(allHistory);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Historial_Mantenimiento");
+    XLSX.writeFile(wb, `Historial_Manto_Flota_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  // IMPORT HISTORY
+  const handleImportHistory = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(ws);
+
+        if (data.length === 0) return;
+
+        setVehicles(prev => {
+          const updated = [...prev];
+          data.forEach((row: any) => {
+            const vIdx = updated.findIndex(v => v.plate === row['Matrícula']);
+            if (vIdx !== -1) {
+              const record: MaintenanceRecord = {
+                id: Math.random().toString(36).substr(2, 9),
+                date: row['Fecha'] || '',
+                type: (row['Tipo'] as any) || 'Preventivo',
+                notes: row['Notas'] || '',
+                statusAtTime: (row['Estado'] as any) || MaintenanceStatus.UP_TO_DATE
+              };
+              // Add to history if it doesn't already exist (simple date/type/notes match check)
+              const exists = updated[vIdx].maintenanceHistory?.some(h => 
+                h.date === record.date && h.notes === record.notes
+              );
+              if (!exists) {
+                updated[vIdx].maintenanceHistory = [record, ...(updated[vIdx].maintenanceHistory || [])];
+                // Optionally update last maintenance date
+                if (!updated[vIdx].lastMaintenance || record.date > updated[vIdx].lastMaintenance) {
+                   updated[vIdx].lastMaintenance = record.date;
+                }
+              }
+            }
+          });
+          return updated;
+        });
+        alert("Historial actualizado correctamente.");
+      } catch (err) {
+        alert("Error al importar el historial.");
+      }
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+    reader.readAsBinaryString(file);
+  };
+
   const dangerAlerts = alerts.filter(a => a.type === 'danger');
   const warningAlerts = alerts.filter(a => a.type === 'warning');
 
@@ -80,16 +152,26 @@ const Maintenance: React.FC<MaintenanceProps> = ({ vehicles, setVehicles, isAdmi
           <h2 className="text-2xl font-bold">Estado de Mantenimiento y Trámites</h2>
           <p className="text-slate-400 text-sm">Historial técnico y control legal de la flota</p>
         </div>
-        <div className="flex gap-4">
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-green-400">
-            <span className="w-3 h-3 bg-green-500 rounded-full"></span> Al día
-          </div>
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-yellow-400">
-            <span className="w-3 h-3 bg-yellow-500 rounded-full"></span> Pendiente
-          </div>
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-red-400">
-            <span className="w-3 h-3 bg-red-500 rounded-full shadow-[0_0_8px_rgba(239,68,68,0.5)] animate-pulse"></span> Atrasado
-          </div>
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={handleExportAll}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl font-bold transition-all border border-slate-700 text-sm"
+          >
+            <FileDown className="w-4 h-4 text-blue-400" />
+            Exportar Historial
+          </button>
+          {isAdmin && (
+            <>
+              <input type="file" ref={fileInputRef} onChange={handleImportHistory} className="hidden" accept=".xlsx, .xls" />
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl font-bold transition-all border border-slate-700 text-sm"
+              >
+                <FileUp className="w-4 h-4 text-green-400" />
+                Importar Historial
+              </button>
+            </>
+          )}
         </div>
       </div>
 

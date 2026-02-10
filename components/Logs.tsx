@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Plus, 
   Fuel, 
@@ -13,9 +13,14 @@ import {
   MapPin,
   Calendar,
   Clock,
-  HardHat
+  HardHat,
+  FileDown,
+  FileUp
 } from 'lucide-react';
 import { LogEntry, Vehicle, Worker, Work, TripType, WorkStatus } from '../types';
+
+// Declare XLSX for TypeScript since it's loaded via CDN
+declare const XLSX: any;
 
 interface LogsProps {
   logs: LogEntry[];
@@ -30,6 +35,7 @@ interface LogsProps {
 
 const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, workers, works, isAdmin, currentUser }) => {
   const [showModal, setShowModal] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState<Partial<LogEntry>>({
     date: new Date().toISOString().split('T')[0],
     time: new Date().toTimeString().slice(0, 5),
@@ -141,11 +147,126 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
     }
   };
 
+  // EXPORT TO EXCEL
+  const handleExport = () => {
+    const exportData = logs.map(log => {
+      const v = vehicles.find(v => v.id === log.vehicleId);
+      const w = workers.find(w => w.id === log.workerId);
+      const o = works.find(o => o.id === log.workId);
+      return {
+        'Fecha': log.date,
+        'Hora': log.time,
+        'Matrícula': v?.plate || 'S/M',
+        'Vehículo': v?.model || 'S/M',
+        'Conductor': w?.name || 'S/M',
+        'Obra/Proyecto': o?.name || 'Ruta Libre',
+        'Tipo': log.tripType,
+        'KM Inicio': log.startKm,
+        'KM Fin': log.endKm,
+        'Distancia (km)': log.distance,
+        'Consumo (L)': log.fuelConsumed,
+        'Consumo Medio (L/100km)': log.avgConsumption,
+        'Notas': log.notes
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Registros");
+    
+    // Generate file
+    const dateStr = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(workbook, `Registros_Flota_${dateStr}.xlsx`);
+  };
+
+  // IMPORT FROM EXCEL
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws);
+
+        if (data.length === 0) {
+          alert("El fichero está vacío.");
+          return;
+        }
+
+        const newLogs: LogEntry[] = [];
+        const vehicleUpdates: Record<string, number> = {};
+
+        data.forEach((row: any) => {
+          // Find IDs from names/plates
+          const vehicle = vehicles.find(v => v.plate === row['Matrícula']);
+          const worker = workers.find(w => w.name === row['Conductor']);
+          const work = works.find(o => o.name === row['Obra/Proyecto']);
+
+          if (!vehicle || !worker) return; // Skip if mandatory info missing
+
+          const startKm = parseInt(row['KM Inicio']) || 0;
+          const endKm = parseInt(row['KM Fin']) || startKm;
+          const distance = endKm - startKm;
+          
+          const adjustedConsumption = vehicle.baseConsumption * (1 + vehicle.wearFactor / 100);
+          const fuel = (distance / 100) * adjustedConsumption;
+
+          const log: LogEntry = {
+            id: Math.random().toString(36).substr(2, 9),
+            date: row['Fecha'] || new Date().toISOString().split('T')[0],
+            time: row['Hora'] || "00:00",
+            vehicleId: vehicle.id,
+            workerId: worker.id,
+            workId: work?.id || '',
+            tripType: (row['Tipo'] as TripType) || TripType.WORKS,
+            startKm,
+            endKm,
+            distance,
+            fuelConsumed: Number(fuel.toFixed(2)),
+            avgConsumption: Number(adjustedConsumption.toFixed(2)),
+            notes: row['Notas'] || ''
+          };
+          newLogs.push(log);
+          
+          // Keep track of latest endKm for each vehicle
+          if (!vehicleUpdates[vehicle.id] || endKm > vehicleUpdates[vehicle.id]) {
+            vehicleUpdates[vehicle.id] = endKm;
+          }
+        });
+
+        if (newLogs.length > 0) {
+          setLogs(prev => [...prev, ...newLogs]);
+          setVehicles(prev => prev.map(v => 
+            vehicleUpdates[v.id] ? { ...v, kilometers: vehicleUpdates[v.id] } : v
+          ));
+          alert(`Se han importado ${newLogs.length} registros correctamente.`);
+        } else {
+          alert("No se pudieron importar registros. Asegúrate de que los nombres de Conductor y Matrículas coinciden exactamente.");
+        }
+      } catch (err) {
+        console.error(err);
+        alert("Error al procesar el archivo Excel.");
+      }
+      // Reset input
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+    reader.readAsBinaryString(file);
+  };
+
   const activeWorks = works.filter(w => w.status === WorkStatus.ACTIVE);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
         <div>
           <h2 className="text-2xl font-bold flex items-center gap-2">
             <History className="w-6 h-6 text-blue-500" />
@@ -153,13 +274,42 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
           </h2>
           <p className="text-slate-400 text-sm">Control diario de trayectos y consumos</p>
         </div>
-        <button 
-          onClick={() => setShowModal(true)} 
-          className="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-xl flex items-center gap-2 font-bold transition-all shadow-lg shadow-blue-600/20 group"
-        >
-          <Plus className="w-5 h-5 group-hover:rotate-90 transition-transform" />
-          Nuevo Registro
-        </button>
+        <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto">
+          {/* Hidden Import Input */}
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleFileChange} 
+            accept=".xlsx, .xls, .csv" 
+            className="hidden" 
+          />
+          
+          <button 
+            onClick={handleExport}
+            className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 font-bold transition-all border border-slate-700 text-sm"
+          >
+            <FileDown className="w-4 h-4 text-blue-400" />
+            Exportar
+          </button>
+
+          {isAdmin && (
+            <button 
+              onClick={handleImportClick}
+              className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 font-bold transition-all border border-slate-700 text-sm"
+            >
+              <FileUp className="w-4 h-4 text-green-400" />
+              Importar
+            </button>
+          )}
+
+          <button 
+            onClick={() => setShowModal(true)} 
+            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 px-6 py-2.5 rounded-xl flex items-center justify-center gap-2 font-bold transition-all shadow-lg shadow-blue-600/20 group"
+          >
+            <Plus className="w-5 h-5 group-hover:rotate-90 transition-transform" />
+            Nuevo Registro
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">

@@ -21,10 +21,26 @@ const Dashboard: React.FC<DashboardProps> = ({ vehicles, workers, works, logs, a
     { label: 'Alertas Totales', value: alerts.length, icon: AlertCircle, color: alerts.some(a => a.type === 'danger') ? 'text-red-500' : 'text-yellow-500', bg: alerts.some(a => a.type === 'danger') ? 'bg-red-500/10' : 'bg-yellow-500/10' },
   ];
 
-  // Logic to find applicable price for a date
+  // Logic to find applicable price for a date supporting intervals
   const getPriceForDate = (date: string) => {
-    const sorted = [...priceHistory].sort((a, b) => b.date.localeCompare(a.date));
-    return sorted.find(p => p.date <= date) || sorted[sorted.length - 1];
+    // 1. Find exact interval matches
+    const applicable = priceHistory.filter(p => {
+      const startsBefore = p.date <= date;
+      const endsAfter = !p.endDate || p.endDate >= date;
+      return startsBefore && endsAfter;
+    });
+
+    if (applicable.length > 0) {
+      // Pick the one with the most recent start date
+      return applicable.sort((a, b) => b.date.localeCompare(a.date))[0];
+    }
+
+    // 2. Fallback: Find the latest one that starts before the date regardless of endDate
+    const fallback = [...priceHistory]
+      .filter(p => p.date <= date)
+      .sort((a, b) => b.date.localeCompare(a.date))[0];
+
+    return fallback || priceHistory[priceHistory.length - 1];
   };
 
   const totalCost = logs.reduce((acc, log) => {

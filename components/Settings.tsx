@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { Settings as SettingsIcon, Fuel, Ruler, Save, RefreshCw, AlertCircle, Plus, Trash2, Calendar, TrendingDown, Table } from 'lucide-react';
+import { Settings as SettingsIcon, Fuel, Ruler, Save, RefreshCw, AlertCircle, Plus, Trash2, Calendar, TrendingDown, Table, ArrowRight } from 'lucide-react';
 import { PriceRecord } from '../types';
 
 interface SettingsProps {
@@ -12,6 +12,7 @@ interface SettingsProps {
 const Settings: React.FC<SettingsProps> = ({ priceHistory, setPriceHistory, isAdmin }) => {
   const [newRecord, setNewRecord] = useState<Partial<PriceRecord>>({
     date: new Date().toISOString().split('T')[0],
+    endDate: '',
     fuelPrice: 1.70,
     costPerKm: 0.15
   });
@@ -19,13 +20,19 @@ const Settings: React.FC<SettingsProps> = ({ priceHistory, setPriceHistory, isAd
   const handleAddRecord = () => {
     if (!isAdmin) return;
     if (!newRecord.date || !newRecord.fuelPrice || !newRecord.costPerKm) {
-      alert("Por favor, completa todos los campos.");
+      alert("Por favor, completa los campos obligatorios (Fecha Inicio, Gasoil y Coste KM).");
+      return;
+    }
+
+    if (newRecord.endDate && newRecord.endDate < newRecord.date) {
+      alert("La fecha de fin no puede ser anterior a la fecha de inicio.");
       return;
     }
 
     const record: PriceRecord = {
       id: Math.random().toString(36).substr(2, 9),
       date: newRecord.date,
+      endDate: newRecord.endDate || undefined,
       fuelPrice: newRecord.fuelPrice,
       costPerKm: newRecord.costPerKm
     };
@@ -61,7 +68,7 @@ const Settings: React.FC<SettingsProps> = ({ priceHistory, setPriceHistory, isAd
             <SettingsIcon className="w-6 h-6 text-blue-500" />
             Ajustes de Costes y Tarifas
           </h2>
-          <p className="text-slate-400 text-sm">Configuración avanzada de precios operativos por fecha</p>
+          <p className="text-slate-400 text-sm">Configuración avanzada de precios operativos por intervalos</p>
         </div>
       </div>
 
@@ -89,8 +96,8 @@ const Settings: React.FC<SettingsProps> = ({ priceHistory, setPriceHistory, isAd
               <p className="text-2xl font-bold text-white">{activePrice?.costPerKm.toFixed(2)} <span className="text-lg text-slate-400 font-normal">€/km</span></p>
             </div>
             <div className="pt-2">
-              <span className="text-xs bg-blue-500/20 text-blue-400 px-3 py-1 rounded-full border border-blue-500/20 font-bold">
-                Efectivo desde: {activePrice?.date}
+              <span className="text-[10px] bg-blue-500/20 text-blue-400 px-3 py-1 rounded-full border border-blue-500/20 font-bold">
+                Intervalo: {activePrice?.date} {activePrice?.endDate ? `hasta ${activePrice.endDate}` : '(Indefinido)'}
               </span>
             </div>
           </div>
@@ -99,38 +106,56 @@ const Settings: React.FC<SettingsProps> = ({ priceHistory, setPriceHistory, isAd
         {/* Add New Record Form */}
         <div className="lg:col-span-2 bg-slate-900/50 border border-slate-800 p-8 rounded-3xl space-y-6">
           <h3 className="text-xl font-bold">Actualizar Tarifas</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-400 uppercase">Fecha</label>
-              <input 
-                type="date"
-                disabled={!isAdmin}
-                value={newRecord.date}
-                onChange={(e) => setNewRecord({ ...newRecord, date: e.target.value })}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-              />
+              <label className="text-xs font-bold text-slate-400 uppercase">Intervalo de Fecha</label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <p className="text-[9px] text-slate-500 uppercase mb-1">Desde</p>
+                  <input 
+                    type="date"
+                    disabled={!isAdmin}
+                    value={newRecord.date}
+                    onChange={(e) => setNewRecord({ ...newRecord, date: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  />
+                </div>
+                <ArrowRight className="w-4 h-4 text-slate-600 mt-4" />
+                <div className="flex-1">
+                  <p className="text-[9px] text-slate-500 uppercase mb-1">Hasta (opcional)</p>
+                  <input 
+                    type="date"
+                    disabled={!isAdmin}
+                    value={newRecord.endDate}
+                    onChange={(e) => setNewRecord({ ...newRecord, endDate: e.target.value })}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  />
+                </div>
+              </div>
             </div>
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-400 uppercase">Gasoil (€/L)</label>
-              <input 
-                type="number"
-                step="0.001"
-                disabled={!isAdmin}
-                value={newRecord.fuelPrice}
-                onChange={(e) => setNewRecord({ ...newRecord, fuelPrice: parseFloat(e.target.value) })}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 font-bold text-green-400"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-400 uppercase">KM (€/km)</label>
-              <input 
-                type="number"
-                step="0.01"
-                disabled={!isAdmin}
-                value={newRecord.costPerKm}
-                onChange={(e) => setNewRecord({ ...newRecord, costPerKm: parseFloat(e.target.value) })}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 font-bold text-blue-400"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-400 uppercase">Gasoil (€/L)</label>
+                <input 
+                  type="number"
+                  step="0.001"
+                  disabled={!isAdmin}
+                  value={newRecord.fuelPrice}
+                  onChange={(e) => setNewRecord({ ...newRecord, fuelPrice: parseFloat(e.target.value) })}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 font-bold text-green-400"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-400 uppercase">KM (€/km)</label>
+                <input 
+                  type="number"
+                  step="0.01"
+                  disabled={!isAdmin}
+                  value={newRecord.costPerKm}
+                  onChange={(e) => setNewRecord({ ...newRecord, costPerKm: parseFloat(e.target.value) })}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 font-bold text-blue-400"
+                />
+              </div>
             </div>
           </div>
           {isAdmin && (
@@ -139,7 +164,7 @@ const Settings: React.FC<SettingsProps> = ({ priceHistory, setPriceHistory, isAd
               className="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-bold flex items-center justify-center gap-2 shadow-xl shadow-blue-600/20 transition-all"
             >
               <Plus className="w-5 h-5" />
-              Publicar Nueva Tarifa
+              Publicar Intervalo de Tarifa
             </button>
           )}
         </div>
@@ -155,7 +180,7 @@ const Settings: React.FC<SettingsProps> = ({ priceHistory, setPriceHistory, isAd
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-800/50 text-slate-500">
               <tr>
-                <th className="px-6 py-4 font-bold uppercase tracking-wider text-[10px]">Fecha Efectiva</th>
+                <th className="px-6 py-4 font-bold uppercase tracking-wider text-[10px]">Intervalo Efectivo</th>
                 <th className="px-6 py-4 font-bold uppercase tracking-wider text-[10px]">Gasoil (€/L)</th>
                 <th className="px-6 py-4 font-bold uppercase tracking-wider text-[10px]">Coste KM (€/km)</th>
                 {isAdmin && <th className="px-6 py-4 font-bold uppercase tracking-wider text-[10px] text-right">Control</th>}
@@ -167,7 +192,16 @@ const Settings: React.FC<SettingsProps> = ({ priceHistory, setPriceHistory, isAd
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2 font-bold text-slate-200">
                       <Calendar className="w-4 h-4 text-slate-500" />
-                      {p.date}
+                      <div className="flex items-center gap-2">
+                        <span>{p.date}</span>
+                        {p.endDate && (
+                          <>
+                            <ArrowRight className="w-3 h-3 text-slate-600" />
+                            <span>{p.endDate}</span>
+                          </>
+                        )}
+                        {!p.endDate && i === 0 && <span className="text-[9px] text-slate-500 font-normal italic ml-2">(En adelante)</span>}
+                      </div>
                       {i === 0 && <span className="ml-2 px-1.5 py-0.5 bg-blue-500/20 text-blue-400 text-[10px] rounded uppercase font-black">Activo</span>}
                     </div>
                   </td>
@@ -196,7 +230,7 @@ const Settings: React.FC<SettingsProps> = ({ priceHistory, setPriceHistory, isAd
         </div>
       </div>
       
-      {/* Full History (Scrollable list if needed) */}
+      {/* Full History */}
       <details className="group">
         <summary className="list-none cursor-pointer flex items-center gap-2 text-slate-500 hover:text-slate-300 transition-colors py-2 px-4 bg-slate-900/30 rounded-lg border border-slate-800/50 w-fit">
           <Calendar className="w-4 h-4" />
@@ -206,7 +240,7 @@ const Settings: React.FC<SettingsProps> = ({ priceHistory, setPriceHistory, isAd
           <ul className="space-y-2">
             {priceHistory.map(p => (
               <li key={p.id} className="flex justify-between items-center text-xs p-2 border-b border-slate-800 last:border-0">
-                <span className="text-slate-400">{p.date}</span>
+                <span className="text-slate-400 font-mono">{p.date} {p.endDate ? `-> ${p.endDate}` : '-> Indef.'}</span>
                 <span className="font-mono text-slate-200">{p.fuelPrice.toFixed(3)} €/L | {p.costPerKm.toFixed(2)} €/km</span>
               </li>
             ))}
@@ -216,9 +250,10 @@ const Settings: React.FC<SettingsProps> = ({ priceHistory, setPriceHistory, isAd
 
       <div className="bg-slate-900/40 p-6 rounded-3xl border border-dashed border-slate-700 flex items-start gap-4">
         <AlertCircle className="w-6 h-6 text-slate-500 shrink-0 mt-1" />
-        <p className="text-slate-500 text-sm italic">
-          <strong>Gestión de Tarifas:</strong> El sistema utiliza el precio efectivo de la fecha más cercana anterior al viaje registrado para calcular los costes históricos con exactitud.
-        </p>
+        <div className="text-slate-500 text-sm italic space-y-2">
+          <p><strong>Gestión de Intervalos:</strong> Puedes definir periodos específicos para una tarifa. Si un viaje cae dentro de un intervalo (entre fecha inicio y fin), se aplicará esa tarifa.</p>
+          <p>Si no hay intervalo definido para una fecha, el sistema buscará la tarifa con la fecha de inicio más reciente anterior al viaje.</p>
+        </div>
       </div>
     </div>
   );

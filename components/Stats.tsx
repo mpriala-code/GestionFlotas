@@ -6,9 +6,11 @@ import {
 } from 'recharts';
 import { 
   TrendingUp, Fuel, Ruler, Wallet, User, HardHat, Truck, Navigation, 
-  ArrowUpRight, ArrowDownRight, Zap, Target
+  ArrowUpRight, ArrowDownRight, Zap, Target, FileDown
 } from 'lucide-react';
 import { LogEntry, Vehicle, Worker, Work, TripType, PriceRecord } from '../types';
+
+declare const XLSX: any;
 
 interface StatsProps {
   logs: LogEntry[];
@@ -25,10 +27,23 @@ type StatsView = 'global' | 'workers' | 'works' | 'vehicles';
 const Stats: React.FC<StatsProps> = ({ logs, vehicles, workers, works, priceHistory }) => {
   const [view, setView] = useState<StatsView>('global');
 
-  // Logic to find applicable price for a date
+  // Logic to find applicable price for a date supporting intervals
   const getPriceForDate = (date: string) => {
-    const sorted = [...priceHistory].sort((a, b) => b.date.localeCompare(a.date));
-    return sorted.find(p => p.date <= date) || sorted[sorted.length - 1];
+    const applicable = priceHistory.filter(p => {
+      const startsBefore = p.date <= date;
+      const endsAfter = !p.endDate || p.endDate >= date;
+      return startsBefore && endsAfter;
+    });
+
+    if (applicable.length > 0) {
+      return applicable.sort((a, b) => b.date.localeCompare(a.date))[0];
+    }
+
+    const fallback = [...priceHistory]
+      .filter(p => p.date <= date)
+      .sort((a, b) => b.date.localeCompare(a.date))[0];
+
+    return fallback || priceHistory[priceHistory.length - 1];
   };
 
   // Basic Calculations
@@ -98,19 +113,58 @@ const Stats: React.FC<StatsProps> = ({ logs, vehicles, workers, works, priceHist
     return Object.values(stats);
   }, [logs]);
 
-  const vehicleEfficiency = useMemo(() => {
-    return vehicles.map(v => {
+  // EXPORT COMPLETE STATS REPORT
+  const handleExportStats = () => {
+    const wb = XLSX.utils.book_new();
+
+    // 1. Sheet Totals
+    const totalsWs = XLSX.utils.json_to_sheet([{
+      'KM Totales': totals.totalKm,
+      'Litros Totales': totals.totalFuel,
+      'Coste Real Total (€)': totals.totalCost,
+      'Media Consumo (L/100)': totals.avgConsumption
+    }]);
+    XLSX.utils.book_append_sheet(wb, totalsWs, "Resumen General");
+
+    // 2. Worker Stats
+    const workerWs = XLSX.utils.json_to_sheet(workerStats.map(w => ({
+      'Trabajador': w.name,
+      'Viajes': w.count,
+      'KM Totales': w.distance,
+      'Litros Totales': w.fuel,
+      'Coste Real (€)': w.cost,
+      'Media Consumo': w.distance > 0 ? (w.fuel/w.distance)*100 : 0
+    })));
+    XLSX.utils.book_append_sheet(wb, workerWs, "Por Trabajador");
+
+    // 3. Work Stats
+    const workWs = XLSX.utils.json_to_sheet(workStats.map(o => ({
+      'Obra': o.name,
+      'KM Totales': o.distance,
+      'Litros Totales': o.fuel,
+      'Coste Real (€)': o.cost
+    })));
+    XLSX.utils.book_append_sheet(wb, workWs, "Por Obra");
+
+    // 4. Vehicle Stats (Simplified from vehicles list)
+    const vehicleSummary = vehicles.map(v => {
       const vLogs = logs.filter(l => l.vehicleId === v.id);
-      const totalKm = vLogs.reduce((acc, l) => acc + l.distance, 0);
-      const totalFuel = vLogs.reduce((acc, l) => acc + l.fuelConsumed, 0);
-      const realAvg = totalKm > 0 ? (totalFuel / totalKm) * 100 : 0;
+      const vKm = vLogs.reduce((acc, l) => acc + l.distance, 0);
+      const vFuel = vLogs.reduce((acc, l) => acc + l.fuelConsumed, 0);
       return {
-        name: v.plate,
-        real: Number(realAvg.toFixed(2)),
-        expected: v.baseConsumption
+        'Matrícula': v.plate,
+        'Modelo': v.model,
+        'KM Actuales': v.kilometers,
+        'KM en Periodo': vKm,
+        'Litros en Periodo': vFuel,
+        'Consumo Medio Real': vKm > 0 ? (vFuel/vKm)*100 : 0
       };
-    }).filter(v => v.real > 0);
-  }, [logs, vehicles]);
+    });
+    const vehicleWs = XLSX.utils.json_to_sheet(vehicleSummary);
+    XLSX.utils.book_append_sheet(wb, vehicleWs, "Por Vehiculo");
+
+    XLSX.writeFile(wb, `Informe_Flota_Completo_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
 
   return (
     <div className="space-y-8 animate-in fade-in duration-700">
@@ -124,6 +178,13 @@ const Stats: React.FC<StatsProps> = ({ logs, vehicles, workers, works, priceHist
           <p className="text-slate-400 text-sm">Informes detallados con precios históricos dinámicos</p>
         </div>
         <div className="flex items-center gap-4">
+          <button 
+            onClick={handleExportStats}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-xl font-bold transition-all shadow-lg shadow-blue-600/20 text-xs"
+          >
+            <FileDown className="w-4 h-4" />
+            Exportar Informe Completo
+          </button>
           <div className="flex bg-slate-900/80 border border-slate-800 p-1 rounded-xl">
             {[
               { id: 'global', label: 'Global', icon: Zap },
@@ -342,8 +403,8 @@ const Stats: React.FC<StatsProps> = ({ logs, vehicles, workers, works, priceHist
           <Zap className="w-10 h-10 text-yellow-400 mx-auto" />
           <h4 className="text-xl font-bold">Análisis de Costes Dinámicos</h4>
           <p className="text-slate-400 text-sm leading-relaxed">
-            El sistema ha calculado un gasto total de <span className="text-white font-bold">{totals.totalCost.toLocaleString(undefined, { maximumFractionDigits: 2 })}€</span> aplicando las tarifas vigentes en la fecha de cada viaje. 
-            Esta metodología permite que tu contabilidad sea exacta independientemente de si el gasoil varía cada día o semana.
+            El sistema ha calculado un gasto total de <span className="text-white font-bold">{totals.totalCost.toLocaleString(undefined, { maximumFractionDigits: 2 })}€</span> aplicando las tarifas vigentes en el periodo de cada viaje. 
+            Esta metodología permite que tu contabilidad sea exacta independientemente de si el gasoil varía según el intervalo de tiempo.
           </p>
         </div>
       </div>
