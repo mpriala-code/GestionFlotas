@@ -4,8 +4,8 @@ import {
   Calendar, Wrench, AlertTriangle, CheckCircle2, Clock, Shield, Euro, 
   FileText, ChevronDown, ChevronUp, History, Plus, Trash2, Save, FileDown, FileUp
 } from 'lucide-react';
-import { Vehicle, MaintenanceStatus, MaintenanceRecord } from '../types';
-import { Alert } from '../App';
+// Cambiamos el origen de Alert a ../types
+import { Vehicle, MaintenanceStatus, MaintenanceRecord, Alert } from '../types';
 
 declare const XLSX: any;
 

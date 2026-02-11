@@ -19,6 +19,14 @@ export enum TripType {
 
 export type AuthRole = 'none' | 'worker' | 'admin';
 
+// Definición de Alerta para el sistema de mantenimiento
+export interface Alert {
+  id: string;
+  type: 'danger' | 'warning';
+  plate: string;
+  reason: string;
+}
+
 export interface PriceRecord {
   id: string;
   date: string; // Fecha de inicio de vigencia

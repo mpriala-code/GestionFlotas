@@ -1,8 +1,8 @@
 
 import React from 'react';
 import { Truck, Users, HardHat, Fuel, TrendingUp, AlertCircle, ChevronRight, ClipboardList } from 'lucide-react';
-import { Vehicle, Worker, Work, LogEntry, PriceRecord } from '../types';
-import { Alert } from '../App';
+// Cambiamos el origen de Alert a ../types
+import { Vehicle, Worker, Work, LogEntry, PriceRecord, Alert } from '../types';
 
 interface DashboardProps {
   vehicles: Vehicle[];
