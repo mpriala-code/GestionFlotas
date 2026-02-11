@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { 
   LayoutDashboard, 
   Truck, 
@@ -87,22 +87,26 @@ const App: React.FC = () => {
   const [logs, setLogs] = useState<LogEntry[]>(() => getStorageItem('fleet_logs', INITIAL_LOGS));
 
   const isAdmin = role === 'admin';
+  const isInitialMount = useRef(true);
 
-  // --- Nube: JSONStorage (Alternativa más fiable) ---
+  // --- Nube: JSONBlob Polling & Sync ---
   const pullFromCloud = useCallback(async (currentSyncId: string) => {
-    if (!currentSyncId) return;
+    if (!currentSyncId || isSyncing) return;
     setIsSyncing(true);
-    setSyncError(false);
     try {
-      const response = await fetch(`https://api.jsonstorage.net/v1/json/${currentSyncId}`);
+      const response = await fetch(`https://jsonblob.com/api/jsonBlob/${currentSyncId}`);
       if (response.ok) {
         const remoteData = await response.json();
-        if (remoteData.vehicles) setVehicles(remoteData.vehicles);
-        if (remoteData.workers) setWorkers(remoteData.workers);
-        if (remoteData.works) setWorks(remoteData.works);
-        if (remoteData.logs) setLogs(remoteData.logs);
+        
+        // Solo actualizar si hay datos y son diferentes (comparación simple por longitud para no saturar)
+        if (remoteData.workers && JSON.stringify(remoteData.workers) !== JSON.stringify(workers)) setWorkers(remoteData.workers);
+        if (remoteData.vehicles && JSON.stringify(remoteData.vehicles) !== JSON.stringify(vehicles)) setVehicles(remoteData.vehicles);
+        if (remoteData.works && JSON.stringify(remoteData.works) !== JSON.stringify(works)) setWorks(remoteData.works);
+        if (remoteData.logs && JSON.stringify(remoteData.logs) !== JSON.stringify(logs)) setLogs(remoteData.logs);
         if (remoteData.priceHistory) setPriceHistory(remoteData.priceHistory);
+        
         setLastSyncTime(new Date());
+        setSyncError(false);
       } else {
         setSyncError(true);
       }
@@ -111,13 +115,14 @@ const App: React.FC = () => {
     } finally {
       setIsSyncing(false);
     }
-  }, []);
+  }, [syncId, workers, vehicles, works, logs, priceHistory]);
 
-  const pushToCloud = useCallback(async (currentSyncId: string, data: any) => {
+  const pushToCloud = useCallback(async (currentSyncId: string) => {
     if (!currentSyncId) return;
     setIsSyncing(true);
     try {
-      const response = await fetch(`https://api.jsonstorage.net/v1/json/${currentSyncId}`, {
+      const data = { vehicles, workers, works, logs, priceHistory };
+      const response = await fetch(`https://jsonblob.com/api/jsonBlob/${currentSyncId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
@@ -133,22 +138,38 @@ const App: React.FC = () => {
     } finally {
       setIsSyncing(false);
     }
-  }, []);
+  }, [vehicles, workers, works, logs, priceHistory]);
 
+  // Efecto de Polling: Revisar la nube cada 15 segundos
   useEffect(() => {
-    if (syncId) pullFromCloud(syncId);
-  }, [syncId, pullFromCloud]);
+    if (!syncId) return;
+    
+    // Pull inicial
+    pullFromCloud(syncId);
 
+    const interval = setInterval(() => {
+      pullFromCloud(syncId);
+    }, 15000); 
+
+    return () => clearInterval(interval);
+  }, [syncId]);
+
+  // Efecto de Empuje: Cuando cambian los datos locales, subir a la nube (Debounced)
   useEffect(() => {
-    if (syncId && isAdmin) {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    if (syncId) {
       const timeout = setTimeout(() => {
-        pushToCloud(syncId, { vehicles, workers, works, logs, priceHistory });
-      }, 5000);
+        pushToCloud(syncId);
+      }, 3000); // 3 segundos de calma antes de subir
       return () => clearTimeout(timeout);
     }
-  }, [vehicles, workers, works, logs, priceHistory, syncId, isAdmin, pushToCloud]);
+  }, [vehicles, workers, works, logs, priceHistory, syncId]);
 
-  // Persistencia local
+  // Persistencia local (Copia de seguridad en el navegador)
   useEffect(() => { localStorage.setItem('fleet_vehicles', JSON.stringify(vehicles)); }, [vehicles]);
   useEffect(() => { localStorage.setItem('fleet_workers', JSON.stringify(workers)); }, [workers]);
   useEffect(() => { localStorage.setItem('fleet_works', JSON.stringify(works)); }, [works]);
@@ -196,7 +217,7 @@ const App: React.FC = () => {
   ];
 
   const visibleNav = useMemo(() => {
-    if (role === 'worker') return navItems.filter(i => i.id === 'logs');
+    if (role === 'worker') return navItems.filter(i => i.id === 'logs' || i.id === 'dashboard');
     if (role === 'none') return navItems.filter(i => i.id === 'dashboard');
     return navItems;
   }, [role]);
@@ -212,7 +233,7 @@ const App: React.FC = () => {
               {syncId && (
                 <div className={`flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider ${syncError ? 'text-red-400' : 'text-green-400'}`}>
                   {syncError ? <WifiOff className="w-2 h-2" /> : <Wifi className="w-2 h-2" />}
-                  {syncError ? 'Error Red' : 'Sincronizado'}
+                  {syncError ? 'Desconectado' : 'Sincronizado'}
                 </div>
               )}
             </div>
@@ -226,7 +247,7 @@ const App: React.FC = () => {
               >
                 <div className={`w-1.5 h-1.5 rounded-full ${isSyncing ? 'bg-blue-500 animate-pulse' : syncError ? 'bg-red-500' : 'bg-green-500'}`} />
                 <span className="text-[10px] font-bold text-slate-400">
-                  {isSyncing ? 'Sinc...' : lastSyncTime ? lastSyncTime.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : 'Conectado'}
+                  {isSyncing ? 'Sync...' : lastSyncTime ? lastSyncTime.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : 'Conectado'}
                 </span>
                 <RefreshCw className={`w-3 h-3 text-slate-400 ${isSyncing ? 'animate-spin' : ''}`} />
               </button>
@@ -283,11 +304,11 @@ const App: React.FC = () => {
               e.preventDefault();
               if (loginType === 'admin') {
                 if (loginUsername === 'admin' && loginPassword === 'admin123') { setRole('admin'); setShowLoginModal(false); }
-                else alert('Admin error');
+                else alert('Credenciales de administrador incorrectas');
               } else {
                 const found = workers.find(w => w.username === loginUsername && w.password === loginPassword);
                 if (found) { setRole('worker'); setCurrentUser(found); setShowLoginModal(false); }
-                else alert('Worker error');
+                else alert('Usuario o contraseña de trabajador incorrectos');
               }
               setLoginUsername(''); setLoginPassword('');
             }} className="space-y-4">
