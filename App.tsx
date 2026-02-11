@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
   LayoutDashboard, 
   Truck, 
@@ -16,7 +16,10 @@ import {
   Settings as SettingsIcon,
   UserCircle,
   ShieldCheck,
-  Share2
+  Share2,
+  Cloud,
+  CloudOff,
+  RefreshCw
 } from 'lucide-react';
 import { 
   Vehicle, Worker, Work, LogEntry, TabType, 
@@ -58,9 +61,13 @@ const getStorageItem = <T,>(key: string, defaultValue: T): T => {
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   
+  // Persisted local state
   const [role, setRole] = useState<AuthRole>(() => getStorageItem('fleet_role', 'none'));
   const [currentUser, setCurrentUser] = useState<Worker | null>(() => getStorageItem('fleet_current_user', null));
-  
+  const [syncId, setSyncId] = useState<string>(() => getStorageItem('fleet_sync_id', ''));
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginType, setLoginType] = useState<AuthRole>('worker');
   const [loginUsername, setLoginUsername] = useState('');
@@ -77,10 +84,58 @@ const App: React.FC = () => {
   const [works, setWorks] = useState<Work[]>(() => getStorageItem('fleet_works', INITIAL_WORKS));
   const [logs, setLogs] = useState<LogEntry[]>(() => getStorageItem('fleet_logs', INITIAL_LOGS));
 
-  const [showShareModal, setShowShareModal] = useState(false);
   const isAdmin = role === 'admin';
 
-  // Persistence Effects
+  // --- CLOUD SYNC LOGIC ---
+
+  const pushToCloud = useCallback(async (currentSyncId: string, data: any) => {
+    if (!currentSyncId) return;
+    setIsSyncing(true);
+    try {
+      // Usamos npoint.io como base de datos JSON rápida y sin registro para este ejemplo
+      // En producción se usaría Supabase o Firebase
+      await fetch(`https://api.npoint.io/${currentSyncId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      setLastSyncTime(new Date());
+    } catch (e) {
+      console.error("Error sincronizando con la nube:", e);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, []);
+
+  const pullFromCloud = useCallback(async (currentSyncId: string) => {
+    if (!currentSyncId) return;
+    setIsSyncing(true);
+    try {
+      const response = await fetch(`https://api.npoint.io/${currentSyncId}`);
+      if (response.ok) {
+        const remoteData = await response.json();
+        if (remoteData.vehicles) setVehicles(remoteData.vehicles);
+        if (remoteData.workers) setWorkers(remoteData.workers);
+        if (remoteData.works) setWorks(remoteData.works);
+        if (remoteData.logs) setLogs(remoteData.logs);
+        if (remoteData.priceHistory) setPriceHistory(remoteData.priceHistory);
+        setLastSyncTime(new Date());
+      }
+    } catch (e) {
+      console.error("Error descargando de la nube:", e);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, []);
+
+  // Sync initialization
+  useEffect(() => {
+    if (syncId) {
+      pullFromCloud(syncId);
+    }
+  }, [syncId, pullFromCloud]);
+
+  // Auto-save & Auto-push
   useEffect(() => { localStorage.setItem('fleet_vehicles', JSON.stringify(vehicles)); }, [vehicles]);
   useEffect(() => { localStorage.setItem('fleet_workers', JSON.stringify(workers)); }, [workers]);
   useEffect(() => { localStorage.setItem('fleet_works', JSON.stringify(works)); }, [works]);
@@ -89,9 +144,20 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('fleet_role', JSON.stringify(role));
     localStorage.setItem('fleet_current_user', JSON.stringify(currentUser));
-  }, [role, currentUser]);
+    localStorage.setItem('fleet_sync_id', JSON.stringify(syncId));
+  }, [role, currentUser, syncId]);
 
-  // URL Import Logic
+  // Effect to push changes when data changes (debounce could be added for performance)
+  useEffect(() => {
+    if (syncId && isAdmin) {
+      const timeout = setTimeout(() => {
+        pushToCloud(syncId, { vehicles, workers, works, logs, priceHistory });
+      }, 2000);
+      return () => clearTimeout(timeout);
+    }
+  }, [vehicles, workers, works, logs, priceHistory, syncId, isAdmin, pushToCloud]);
+
+  // URL Hash sharing (One-time import)
   useEffect(() => {
     const hash = window.location.hash.substring(1);
     if (hash && hash.length > 10) {
@@ -99,19 +165,16 @@ const App: React.FC = () => {
         const decompressed = LZString.decompressFromEncodedURIComponent(hash);
         if (decompressed) {
           const remoteData = JSON.parse(decompressed);
-          if (confirm('Se han detectado datos en el enlace. ¿Deseas importar esta configuración? Esto sobrescribirá tus datos actuales.')) {
+          if (confirm('Se ha compartido una configuración contigo. ¿Deseas importarla?')) {
             if (remoteData.vehicles) setVehicles(remoteData.vehicles);
             if (remoteData.workers) setWorkers(remoteData.workers);
             if (remoteData.works) setWorks(remoteData.works);
             if (remoteData.logs) setLogs(remoteData.logs);
             if (remoteData.priceHistory) setPriceHistory(remoteData.priceHistory);
-            alert('Datos importados correctamente.');
-            window.location.hash = ''; // Clear hash
+            window.location.hash = '';
           }
         }
-      } catch (e) {
-        console.error("Error al importar desde URL:", e);
-      }
+      } catch (e) {}
     }
   }, []);
 
@@ -126,18 +189,15 @@ const App: React.FC = () => {
         { dateStr: v.itvDate, label: 'ITV' },
         { dateStr: v.insuranceExpiry, label: 'Seguro' },
         { dateStr: v.nextMaintenance, label: 'Mantenimiento' },
-        { dateStr: v.taxDate, label: 'Impuesto Circulación' },
+        { dateStr: v.taxDate, label: 'Impuesto' },
       ];
       checkDates.forEach(d => {
         if (d.dateStr) {
           const alertDate = new Date(d.dateStr);
           alertDate.setHours(0, 0, 0, 0);
           if (!isNaN(alertDate.getTime())) {
-            if (alertDate < today) {
-              results.push({ id: `${v.id}-${d.label}-expired`, plate: v.plate, model: v.model, reason: `${d.label} caducado`, type: 'danger' });
-            } else if (alertDate <= threshold) {
-              results.push({ id: `${v.id}-${d.label}-warning`, plate: v.plate, model: v.model, reason: `${d.label} próximo`, type: 'warning' });
-            }
+            if (alertDate < today) results.push({ id: `${v.id}-${d.label}`, plate: v.plate, model: v.model, reason: `${d.label} caducada`, type: 'danger' });
+            else if (alertDate <= threshold) results.push({ id: `${v.id}-${d.label}`, plate: v.plate, model: v.model, reason: `${d.label} próximo`, type: 'warning' });
           }
         }
       });
@@ -182,10 +242,30 @@ const App: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="bg-blue-600 p-2 rounded-lg"><Truck className="w-5 h-5 text-white" /></div>
-            <h1 className="text-xl font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">FleetMaster AI</h1>
+            <div className="flex flex-col">
+              <h1 className="text-xl font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent leading-tight">FleetMaster AI</h1>
+              {syncId && (
+                <div className="flex items-center gap-1 text-[9px] text-green-400 uppercase font-bold tracking-widest">
+                  <Cloud className="w-2.5 h-2.5" />
+                  Conectado a Nube
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-3">
+            {syncId && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 rounded-full border border-slate-700">
+                <div className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-blue-500 animate-pulse' : 'bg-green-500'}`} />
+                <span className="text-[10px] font-bold text-slate-400 hidden sm:inline">
+                  {isSyncing ? 'Sincronizando...' : lastSyncTime ? `Sinc: ${lastSyncTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}` : 'Listo'}
+                </span>
+                <button onClick={() => pullFromCloud(syncId)} className="p-1 hover:bg-slate-700 rounded-md transition-colors" title="Actualizar datos ahora">
+                  <RefreshCw className={`w-3 h-3 text-slate-400 ${isSyncing ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+            )}
+
             {isAdmin && (
                <button 
                 onClick={() => {
@@ -193,13 +273,13 @@ const App: React.FC = () => {
                   const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(data));
                   const url = `${window.location.origin}${window.location.pathname}#${compressed}`;
                   navigator.clipboard.writeText(url);
-                  alert("¡Enlace de compartición copiado al portapapeles! Cualquiera con este enlace verá tus datos actuales.");
+                  alert("¡Enlace de sesión copiado! Comparte este enlace para que otros carguen tus datos actuales.");
                 }}
-                className="p-2 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 rounded-lg transition-colors border border-blue-500/20 flex items-center gap-2 text-xs font-bold"
-                title="Generar enlace compartido"
+                className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg border border-slate-700 flex items-center gap-2 text-xs font-bold"
+                title="Generar enlace de sesión"
               >
                 <Share2 className="w-4 h-4" />
-                <span className="hidden sm:inline">Compartir</span>
+                <span className="hidden lg:inline">Compartir Sesión</span>
               </button>
             )}
 
@@ -207,7 +287,7 @@ const App: React.FC = () => {
               <button onClick={() => setShowLoginModal(true)} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-sm font-bold shadow-lg">Acceder</button>
             ) : (
               <div className="flex items-center gap-4">
-                <div className="hidden sm:flex flex-col items-end">
+                <div className="hidden md:flex flex-col items-end">
                   <span className="text-xs font-bold">{role === 'admin' ? 'Admin' : currentUser?.name}</span>
                   <span className="text-[9px] text-slate-500 uppercase">{role}</span>
                 </div>
@@ -234,15 +314,20 @@ const App: React.FC = () => {
         {activeTab === 'logs' && <Logs logs={logs} setLogs={setLogs} vehicles={vehicles} setVehicles={setVehicles} workers={workers} works={works} isAdmin={isAdmin} currentUser={currentUser} />}
         {activeTab === 'stats' && <Stats logs={logs} vehicles={vehicles} workers={workers} works={works} priceHistory={priceHistory} />}
         {activeTab === 'maintenance' && <Maintenance vehicles={vehicles} setVehicles={setVehicles} isAdmin={isAdmin} alerts={alerts} />}
-        {activeTab === 'settings' && <Settings priceHistory={priceHistory} setPriceHistory={setPriceHistory} isAdmin={isAdmin} 
-            onImportJSON={(data) => {
-              if(data.vehicles) setVehicles(data.vehicles);
-              if(data.workers) setWorkers(data.workers);
-              if(data.works) setWorks(data.works);
-              if(data.logs) setLogs(data.logs);
-              if(data.priceHistory) setPriceHistory(data.priceHistory);
-            }} 
-            fullState={{vehicles, workers, works, logs, priceHistory}} 
+        {activeTab === 'settings' && <Settings 
+          priceHistory={priceHistory} 
+          setPriceHistory={setPriceHistory} 
+          isAdmin={isAdmin} 
+          syncId={syncId}
+          setSyncId={setSyncId}
+          onImportJSON={(data) => {
+            if(data.vehicles) setVehicles(data.vehicles);
+            if(data.workers) setWorkers(data.workers);
+            if(data.works) setWorks(data.works);
+            if(data.logs) setLogs(data.logs);
+            if(data.priceHistory) setPriceHistory(data.priceHistory);
+          }} 
+          fullState={{vehicles, workers, works, logs, priceHistory}} 
         />}
       </main>
 
