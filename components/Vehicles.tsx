@@ -23,7 +23,6 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
   const [showLoanModal, setShowLoanModal] = useState<string | null>(null);
   
   // New installment form state
-  const [showAddInstallment, setShowAddInstallment] = useState(false);
   const [newInsDate, setNewInsDate] = useState(new Date().toISOString().split('T')[0]);
   const [newInsAmount, setNewInsAmount] = useState(0);
 
@@ -92,25 +91,12 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
     setShowModal(false);
     setEditingVehicle(null);
     setFormData({
-      plate: '',
-      model: '',
-      type: 'Furgoneta',
-      vin: '',
-      year: new Date().getFullYear(),
-      purchaseDate: '',
-      kilometers: 0,
-      baseConsumption: 0,
-      wearFactor: 0,
-      taxDate: '',
-      taxAmount: 0,
-      nextGeneralPayment: '',
-      insuranceCost: 0,
-      insuranceExpiry: '',
-      itvDate: '',
-      lastMaintenance: '',
-      nextMaintenance: '',
-      maintStatus: MaintenanceStatus.UP_TO_DATE,
-      maintNotes: '',
+      plate: '', model: '', type: 'Furgoneta', vin: '',
+      year: new Date().getFullYear(), purchaseDate: '', kilometers: 0,
+      baseConsumption: 0, wearFactor: 0, taxDate: '', taxAmount: 0,
+      nextGeneralPayment: '', insuranceCost: 0, insuranceExpiry: '',
+      itvDate: '', lastMaintenance: '', nextMaintenance: '',
+      maintStatus: MaintenanceStatus.UP_TO_DATE, maintNotes: '',
       loan: { active: false, totalAmount: 0, monthlyFee: 0, startDate: '', endDate: '', remainingAmount: 0, installments: [] }
     });
   };
@@ -164,7 +150,6 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
       }
       return v;
     }));
-    setShowAddInstallment(false);
     setNewInsAmount(0);
   };
 
@@ -213,6 +198,8 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
     XLSX.utils.book_append_sheet(wb, ws, "Vehiculos");
     XLSX.writeFile(wb, `Inventario_Flota_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
+
+  const activeVehicleForLoan = vehicles.find(v => v.id === showLoanModal);
 
   return (
     <div className="space-y-6">
@@ -315,13 +302,13 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
       </div>
 
       {/* Loan Installments Modal */}
-      {showLoanModal && (
+      {showLoanModal && activeVehicleForLoan && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/95 backdrop-blur-md">
           <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] w-full max-w-xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
             <div className="p-8 border-b border-slate-800 flex justify-between items-center bg-slate-900/50 rounded-t-[2.5rem]">
               <div>
                 <h2 className="text-2xl font-black tracking-tight">Cotas de Préstamo</h2>
-                <p className="text-xs text-blue-400 font-bold uppercase tracking-widest">{vehicles.find(v => v.id === showLoanModal)?.plate}</p>
+                <p className="text-xs text-blue-400 font-bold uppercase tracking-widest">{activeVehicleForLoan.plate}</p>
               </div>
               <button onClick={() => setShowLoanModal(null)} className="text-slate-500 hover:text-white text-4xl font-light">&times;</button>
             </div>
@@ -334,7 +321,7 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
                       <Plus className="w-4 h-4 text-blue-400" />
                       <h4 className="text-xs font-black uppercase tracking-widest text-blue-400">Acciones del Plan</h4>
                     </div>
-                    {vehicles.find(v => v.id === showLoanModal)?.loan.installments?.length ? (
+                    {activeVehicleForLoan.loan.installments?.length ? (
                       <button 
                         onClick={() => clearInstallments(showLoanModal)}
                         className="text-[9px] font-bold text-red-500 hover:text-red-400 flex items-center gap-1 uppercase"
@@ -357,9 +344,9 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
                 </div>
               )}
 
-              {vehicles.find(v => v.id === showLoanModal)?.loan.installments?.length ? (
+              {activeVehicleForLoan.loan.installments?.length ? (
                 <div className="space-y-3">
-                  {vehicles.find(v => v.id === showLoanModal)?.loan.installments?.map(ins => (
+                  {activeVehicleForLoan.loan.installments.map(ins => (
                     <div key={ins.id} className={`p-5 rounded-3xl border transition-all flex items-center justify-between ${ins.paid ? 'bg-green-500/5 border-green-500/20 shadow-[0_0_15px_rgba(34,197,94,0.05)]' : 'bg-slate-800/50 border-slate-700'}`}>
                       <div className="flex items-center gap-5">
                         <div className={`p-3 rounded-2xl ${ins.paid ? 'bg-green-500/10' : 'bg-slate-700'}`}>
@@ -388,14 +375,13 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
                   </div>
                   <div className="space-y-2 px-8">
                     <p className="text-slate-400 font-bold">Sin plan de pagos activo</p>
-                    <p className="text-xs text-slate-500 max-w-[250px] mx-auto italic">Todavía no se han generado las cotas para este préstamo. Pulsa el botón de abajo para autogenerar el plan basado en la cuota mensual.</p>
+                    <p className="text-xs text-slate-500 max-w-[250px] mx-auto italic">Todavía no se han generado las cotas para este préstamo.</p>
                   </div>
                   {isAdmin && (
                     <button 
                       onClick={() => generateInstallments(showLoanModal)}
                       className="bg-blue-600 hover:bg-blue-500 px-8 py-3.5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-blue-600/20 transition-all active:scale-95 flex items-center gap-2 mx-auto"
                     >
-                      {/* Added missing RefreshCw icon */}
                       <RefreshCw className="w-4 h-4" /> Generar Plan Automático
                     </button>
                   )}
@@ -407,106 +393,16 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
                <div className="flex justify-between items-center">
                   <div className="flex flex-col">
                     <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Total Pendiente</span>
-                    <span className="text-2xl text-yellow-500 font-black">{vehicles.find(v => v.id === showLoanModal)?.loan.remainingAmount.toLocaleString()} €</span>
+                    <span className="text-2xl text-yellow-500 font-black">{activeVehicleForLoan.loan.remainingAmount.toLocaleString()} €</span>
                   </div>
                   <div className="text-right">
                     <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 block">Pagado</span>
                     <span className="text-lg text-green-500 font-bold">
-                      {((vehicles.find(v => v.id === showLoanModal)?.loan.totalAmount || 0) - (vehicles.find(v => v.id === showLoanModal)?.loan.remainingAmount || 0)).toLocaleString()} €
+                      {(activeVehicleForLoan.loan.totalAmount - activeVehicleForLoan.loan.remainingAmount).toLocaleString()} €
                     </span>
                   </div>
                </div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Main Vehicle Modal */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/95 backdrop-blur-md overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-[3rem] w-full max-w-4xl shadow-2xl my-8 animate-in zoom-in-95 duration-200">
-            <div className="p-8 border-b border-slate-800 flex justify-between items-center">
-              <h2 className="text-2xl font-black tracking-tight">{editingVehicle ? 'Editar Ficha Vehículo' : 'Añadir Vehículo a la Flota'}</h2>
-              <button onClick={closeModal} className="text-slate-400 hover:text-white text-3xl font-light">&times;</button>
-            </div>
-            
-            <form onSubmit={handleSubmit} className="p-10 space-y-10">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-                <div className="space-y-8">
-                  <div className="flex items-center gap-3 text-blue-400 font-bold uppercase text-[10px] tracking-widest">
-                    <div className="p-1.5 bg-blue-500/10 rounded-lg"><FileText className="w-4 h-4" /></div> Información Técnica
-                  </div>
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest px-1">Matrícula</label>
-                      <input required value={formData.plate} onChange={e => setFormData({...formData, plate: e.target.value.toUpperCase()})} className="w-full bg-slate-800 border border-slate-700 rounded-2xl p-4 text-lg font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all" placeholder="0000-BBB" />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest px-1">Consumo Base</label>
-                      <input type="number" step="0.1" required value={formData.baseConsumption} onChange={e => setFormData({...formData, baseConsumption: parseFloat(e.target.value)})} className="w-full bg-slate-800 border border-slate-700 rounded-2xl p-4 text-lg font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all" placeholder="L/100" />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest px-1">Marca y Modelo</label>
-                    <input required value={formData.model} onChange={e => setFormData({...formData, model: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-2xl p-4 text-lg font-bold outline-none focus:ring-2 focus:ring-blue-500 transition-all" placeholder="Ej: Renault Master L3H2" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest px-1">Año</label>
-                      <input type="number" required value={formData.year} onChange={e => setFormData({...formData, year: parseInt(e.target.value)})} className="w-full bg-slate-800 border border-slate-700 rounded-2xl p-4 text-sm outline-none" />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest px-1">Kilómetros Actuales</label>
-                      <input type="number" required value={formData.kilometers} onChange={e => setFormData({...formData, kilometers: parseInt(e.target.value)})} className="w-full bg-slate-800 border border-slate-700 rounded-2xl p-4 text-sm outline-none" />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-8">
-                  <div className="flex items-center gap-3 text-yellow-500 font-bold uppercase text-[10px] tracking-widest">
-                    <div className="p-1.5 bg-yellow-500/10 rounded-lg"><CreditCard className="w-4 h-4" /></div> Financiación Actual
-                  </div>
-                  <div className="bg-slate-800/30 p-8 rounded-[2.5rem] border border-slate-800 space-y-6">
-                    <div className="flex justify-between items-center bg-slate-900/50 p-4 rounded-2xl border border-slate-700/50">
-                      <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">¿Tiene Préstamo?</span>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input 
-                          type="checkbox" 
-                          className="sr-only peer"
-                          checked={formData.loan?.active} 
-                          onChange={e => setFormData({...formData, loan: {...formData.loan!, active: e.target.checked}})} 
-                        />
-                        <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                      </label>
-                    </div>
-                    
-                    {formData.loan?.active && (
-                      <div className="space-y-6 animate-in fade-in slide-in-from-top-4">
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <label className="text-[10px] text-slate-500 font-bold uppercase px-1">Importe Total (€)</label>
-                            <input type="number" value={formData.loan?.totalAmount} onChange={e => setFormData({...formData, loan: {...formData.loan!, totalAmount: parseFloat(e.target.value), remainingAmount: parseFloat(e.target.value)}})} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm font-bold text-yellow-500" />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-[10px] text-slate-500 font-bold uppercase px-1">Cuota Mensual (€)</label>
-                            <input type="number" value={formData.loan?.monthlyFee} onChange={e => setFormData({...formData, loan: {...formData.loan!, monthlyFee: parseFloat(e.target.value)}})} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm font-bold text-blue-400" />
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-[10px] text-slate-500 font-bold uppercase px-1">Fecha Inicio Préstamo</label>
-                          <input type="date" value={formData.loan?.startDate} onChange={e => setFormData({...formData, loan: {...formData.loan!, startDate: e.target.value}})} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm" />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-8 border-t border-slate-800 flex justify-end gap-6">
-                <button type="button" onClick={closeModal} className="px-10 py-4 rounded-2xl font-bold bg-slate-800 hover:bg-slate-700 transition-all active:scale-95">Cancelar</button>
-                <button type="submit" className="px-12 py-4 rounded-2xl font-black bg-blue-600 hover:bg-blue-500 shadow-2xl shadow-blue-600/40 transition-all active:scale-95 uppercase tracking-widest text-xs">Confirmar y Guardar</button>
-              </div>
-            </form>
           </div>
         </div>
       )}

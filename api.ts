@@ -3,16 +3,14 @@
  * API Service for FleetMaster AI - Cloud Run + Firestore
  */
 
-// IMPORTANTE: Debes poner la URL real que te dio Google Cloud Run al desplegar.
-// Ejemplo: "https://fleetmaster-backend-8fjs92.a.run.app"
-const CLOUD_RUN_URL = "https://fleetmaster-backend-XXXXX.a.run.app"; 
+// REEMPLAZA ESTA URL con la que te dé Google Cloud Run tras desplegar
+const CLOUD_RUN_URL = "https://fleetmaster-backend-8fjs92.a.run.app"; 
 
 export const cloudApi = {
-  async getData(idToken: string) {
-    if (!idToken) return null;
-    console.log("📡 Intentando PULL desde:", CLOUD_RUN_URL);
+  async getData(idToken: string, fleetId: string) {
+    if (!idToken || !fleetId) return null;
     try {
-      const response = await fetch(`${CLOUD_RUN_URL}/api/fleet`, {
+      const response = await fetch(`${CLOUD_RUN_URL}/api/fleet/${fleetId}`, {
         method: 'GET',
         headers: { 
           'Authorization': `Bearer ${idToken}`,
@@ -20,30 +18,18 @@ export const cloudApi = {
         }
       });
       
-      if (response.status === 401) {
-        console.error("❌ Error 401: Token de Firebase no válido o expirado.");
-        return null;
-      }
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Error de Servidor (${response.status}): ${errorText}`);
-      }
-      
-      const data = await response.json();
-      console.log("✅ Datos recibidos de la nube:", data);
-      return data;
+      if (!response.ok) throw new Error(`Error ${response.status}`);
+      return await response.json();
     } catch (error) {
-      console.error("🚨 Error crítico en PULL:", error);
+      console.error("🚨 Error PULL:", error);
       throw error;
     }
   },
 
-  async putData(idToken: string, payload: any) {
-    if (!idToken) return null;
-    console.log("📤 Intentando PUSH a:", CLOUD_RUN_URL);
+  async putData(idToken: string, fleetId: string, payload: any) {
+    if (!idToken || !fleetId) return null;
     try {
-      const response = await fetch(`${CLOUD_RUN_URL}/api/fleet`, {
+      const response = await fetch(`${CLOUD_RUN_URL}/api/fleet/${fleetId}`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -52,15 +38,10 @@ export const cloudApi = {
         body: JSON.stringify({ payload })
       });
       
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Error de Servidor (${response.status}): ${errorText}`);
-      }
-      
-      console.log("✅ Sincronización exitosa con Firestore.");
+      if (!response.ok) throw new Error(`Error ${response.status}`);
       return await response.json();
     } catch (error) {
-      console.error("🚨 Error crítico en PUSH:", error);
+      console.error("🚨 Error PUSH:", error);
       throw error;
     }
   }

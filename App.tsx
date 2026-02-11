@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { 
   LayoutDashboard, Truck, Users, HardHat, ClipboardList, BarChart3, Wrench, LogIn, LogOut,
   Wifi, WifiOff, Lock, RefreshCw, Cloud, ShieldCheck, Settings as SettingsIcon, User as UserIcon,
-  Zap, PlayCircle
+  Zap, PlayCircle, CheckCircle2, AlertCircle
 } from 'lucide-react';
 
 // Firebase Imports
@@ -31,32 +31,25 @@ import Stats from './components/Stats';
 import Maintenance from './components/Maintenance';
 import Settings from './components/Settings';
 
-// Configuración Firebase (Opcional para modo local)
+// CONFIGURACIÓN OBLIGATORIA: Pon aquí tus datos de Firebase Console
 const firebaseConfig = {
-  apiKey: "TU_API_KEY",
-  authDomain: "TU_PROYECTO.firebaseapp.com",
-  projectId: "TU_PROYECTO",
-  storageBucket: "TU_PROYECTO.appspot.com",
-  messagingSenderId: "ID",
-  appId: "APP_ID"
+  apiKey: "AIzaSyD...",
+  authDomain: "tu-proyecto.firebaseapp.com",
+  projectId: "tu-proyecto",
+  storageBucket: "tu-proyecto.appspot.com",
+  messagingSenderId: "123456",
+  appId: "1:123456:web:abcd"
 };
-
-// Inicialización segura de Firebase
-let auth: any = null;
-try {
-  if (firebaseConfig.apiKey !== "TU_API_KEY") {
-    const app = initializeApp(firebaseConfig);
-    auth = getAuth(app);
-  }
-} catch (e) {
-  console.warn("Firebase no configurado correctamente.");
-}
 
 const getStorageItem = <T,>(key: string, defaultValue: T): T => {
   const saved = localStorage.getItem(key);
   if (!saved) return defaultValue;
   try { return JSON.parse(saved); } catch (e) { return defaultValue; }
 };
+
+// Inicialización de Firebase
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
 
 const navItems = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -72,12 +65,12 @@ const navItems = [
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   const [role, setRole] = useState<AuthRole>(() => getStorageItem('fleet_role', 'none'));
-  const [fbUser, setFbUser] = useState<User | null>(null);
   const [idToken, setIdToken] = useState<string>('');
+  const [fleetId, setFleetId] = useState<string>(() => getStorageItem('fleet_id', ''));
   
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [isOnline, setIsOnline] = useState(true);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+  const [isLoadingRemote, setIsLoadingRemote] = useState(false);
 
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -89,83 +82,105 @@ const App: React.FC = () => {
   const [logs, setLogs] = useState<LogEntry[]>(() => getStorageItem('fleet_logs', INITIAL_LOGS));
   const [priceHistory, setPriceHistory] = useState<PriceRecord[]>(() => getStorageItem('fleet_prices', [{ id: 'p_now', date: new Date().toISOString().split('T')[0], fuelPrice: 1.70, costPerKm: 0.15 }]));
 
-  const lastUpdateRef = useRef<number>(Date.now());
+  const syncTimeoutRef = useRef<number | null>(null);
+  const isInitialMount = useRef(true);
 
-  // 1. Monitor de Auth de Firebase
+  // 1. Cargar datos remotos al iniciar o cambiar fleetId
+  const pullData = useCallback(async (token: string, fid: string) => {
+    if (!token || !fid) return;
+    setIsLoadingRemote(true);
+    setSyncStatus('syncing');
+    try {
+      const remote = await cloudApi.getData(token, fid);
+      if (remote && remote.payload) {
+        setVehicles(remote.payload.vehicles || []);
+        setWorkers(remote.payload.workers || []);
+        setWorks(remote.payload.works || []);
+        setLogs(remote.payload.logs || []);
+        setPriceHistory(remote.payload.priceHistory || []);
+        setSyncStatus('synced');
+        setLastSyncTime(new Date());
+      } else {
+        setSyncStatus('idle');
+      }
+    } catch (e) {
+      setSyncStatus('error');
+    } finally {
+      setIsLoadingRemote(false);
+    }
+  }, []);
+
+  // Monitor Auth
   useEffect(() => {
-    if (!auth) return;
     return onAuthStateChanged(auth, async (user) => {
       if (user) {
         const token = await user.getIdToken();
-        setFbUser(user as User);
         setIdToken(token);
         setRole('admin');
+        if (fleetId) pullData(token, fleetId);
+      } else {
+        const isDemo = localStorage.getItem('fleet_demo_mode') === 'true';
+        if (!isDemo) setRole('none');
       }
     });
-  }, []);
+  }, [fleetId, pullData]);
 
-  // 2. Persistencia en LocalStorage
+  // 2. Persistencia en LocalStorage (Copia de seguridad local)
   useEffect(() => {
     localStorage.setItem('fleet_vehicles', JSON.stringify(vehicles));
     localStorage.setItem('fleet_workers', JSON.stringify(workers));
     localStorage.setItem('fleet_works', JSON.stringify(works));
     localStorage.setItem('fleet_logs', JSON.stringify(logs));
     localStorage.setItem('fleet_prices', JSON.stringify(priceHistory));
-    localStorage.setItem('fleet_role', JSON.stringify(role));
-  }, [vehicles, workers, works, logs, priceHistory, role]);
+    localStorage.setItem('fleet_id', fleetId);
+  }, [vehicles, workers, works, logs, priceHistory, fleetId]);
+
+  // 3. Auto-Sincronización PUSH (Debounced)
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    if (!idToken || !fleetId || role !== 'admin') return;
+
+    if (syncTimeoutRef.current) window.clearTimeout(syncTimeoutRef.current);
+
+    setSyncStatus('syncing');
+    syncTimeoutRef.current = window.setTimeout(async () => {
+      try {
+        await cloudApi.putData(idToken, fleetId, {
+          vehicles, workers, works, logs, priceHistory
+        });
+        setSyncStatus('synced');
+        setLastSyncTime(new Date());
+      } catch (e) {
+        setSyncStatus('error');
+      }
+    }, 3000);
+
+    return () => { if (syncTimeoutRef.current) window.clearTimeout(syncTimeoutRef.current); };
+  }, [vehicles, workers, works, logs, priceHistory, idToken, fleetId, role]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // ACCESO MAESTRO ADMIN / 1234
     if (loginUsername === 'admin' && loginPassword === '1234') {
       localStorage.setItem('fleet_demo_mode', 'true');
       setRole('admin');
       return;
     }
-
-    if (!auth) {
-      alert("Para usar este usuario, configura Firebase. O usa 'admin' / '1234'");
-      return;
-    }
-
     try {
       await signInWithEmailAndPassword(auth, loginUsername, loginPassword);
-    } catch (error: any) {
-      alert("Error: Credenciales incorrectas");
+    } catch (error) {
+      alert("Error de acceso: Credenciales no válidas.");
     }
   };
 
   const handleLogout = () => {
-    if (confirm('¿Cerrar sesión?')) {
-      if (auth) signOut(auth);
-      localStorage.removeItem('fleet_demo_mode');
-      localStorage.removeItem('fleet_role');
-      setRole('none');
-      setFbUser(null);
-      setIdToken('');
-    }
+    signOut(auth);
+    localStorage.removeItem('fleet_demo_mode');
+    setRole('none');
+    setIdToken('');
   };
-
-  const pullFromCloud = useCallback(async (token: string) => {
-    if (!token) return;
-    setIsSyncing(true);
-    try {
-      const remote = await cloudApi.getData(token);
-      if (remote && remote.payload) {
-        setVehicles(remote.payload.vehicles);
-        setLogs(remote.payload.logs);
-        setWorkers(remote.payload.workers);
-        setWorks(remote.payload.works);
-        setPriceHistory(remote.payload.priceHistory);
-        setLastSyncTime(new Date());
-      }
-    } catch (e) {
-      setIsOnline(false);
-    } finally {
-      setIsSyncing(false);
-    }
-  }, []);
 
   const alerts: Alert[] = useMemo(() => {
     const arr: Alert[] = [];
@@ -184,33 +199,17 @@ const App: React.FC = () => {
         <div className="w-full max-w-md animate-in zoom-in-95 duration-500">
           <div className="flex flex-col items-center mb-10 text-center">
             <div className="bg-blue-600 p-4 rounded-3xl shadow-2xl mb-4"><Truck className="w-10 h-10 text-white" /></div>
-            <h1 className="text-4xl font-black bg-gradient-to-r from-white to-slate-500 bg-clip-text text-transparent">FleetMaster AI</h1>
-            <p className="text-slate-500 text-xs font-bold uppercase tracking-[0.2em] mt-2">Gestión Profesional de Flotas</p>
+            <h1 className="text-4xl font-black bg-gradient-to-r from-white to-slate-500 bg-clip-text text-transparent text-center">FleetMaster AI</h1>
+            <p className="text-slate-500 text-xs font-bold uppercase tracking-[0.2em] mt-2">Nube y Gestión en Tiempo Real</p>
           </div>
-
-          <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl space-y-8">
-            <h2 className="text-2xl font-bold text-center flex items-center justify-center gap-3">
-              <Lock className="w-5 h-5 text-blue-500" /> Acceso al Sistema
-            </h2>
-
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">Usuario / Email</label>
-                <input required type="text" value={loginUsername} onChange={e => setLoginUsername(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-5 py-4 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all" placeholder="admin" />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">Contraseña</label>
-                <input required type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-5 py-4 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all" placeholder="••••" />
-              </div>
-              <button type="submit" className="w-full bg-blue-600 py-4 rounded-2xl font-black uppercase tracking-widest hover:bg-blue-500 transition-all shadow-lg shadow-blue-600/20 active:scale-95">
-                Entrar ahora
-              </button>
-            </form>
-            
-            <p className="text-[10px] text-center text-slate-500 italic px-4">
-              Pista: Credenciales maestras habilitadas para este dispositivo.
-            </p>
-          </div>
+          <form onSubmit={handleLogin} className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl space-y-6">
+            <h2 className="text-xl font-bold text-center flex items-center justify-center gap-2"><Lock className="w-5 h-5 text-blue-500" /> Acceso Seguro</h2>
+            <div className="space-y-4">
+              <input required type="text" value={loginUsername} onChange={e => setLoginUsername(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-5 py-4 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all" placeholder="Email o 'admin'" />
+              <input required type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-5 py-4 text-white outline-none focus:ring-2 focus:ring-blue-500 transition-all" placeholder="Contraseña o '1234'" />
+              <button type="submit" className="w-full bg-blue-600 py-4 rounded-2xl font-black uppercase tracking-widest hover:bg-blue-500 transition-all shadow-lg shadow-blue-600/20 active:scale-95">Iniciar Sesión</button>
+            </div>
+          </form>
         </div>
       </div>
     );
@@ -218,6 +217,17 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-50">
+      {isLoadingRemote && (
+        <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center">
+          <div className="relative">
+            <RefreshCw className="w-16 h-16 text-blue-500 animate-spin" />
+            <Cloud className="w-8 h-8 text-white absolute inset-0 m-auto" />
+          </div>
+          <h2 className="text-2xl font-black mt-6 tracking-tight">Sincronizando Flota...</h2>
+          <p className="text-slate-500 mt-2 font-bold uppercase tracking-widest text-[10px]">Descargando registros desde Firestore</p>
+        </div>
+      )}
+
       <header className="bg-slate-900/50 backdrop-blur-xl border-b border-slate-800 p-4 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-3">
@@ -225,24 +235,14 @@ const App: React.FC = () => {
             <div>
               <h1 className="text-xl font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">FleetMaster AI</h1>
               <div className="flex items-center gap-2">
-                 {idToken ? (
-                   <span className="flex items-center gap-1 text-[9px] text-green-400 font-bold uppercase tracking-widest">
-                     <ShieldCheck className="w-3 h-3" /> Sincronización Cloud
-                   </span>
-                 ) : (
-                   <span className="flex items-center gap-1 text-[9px] text-yellow-500 font-bold uppercase tracking-widest">
-                     <WifiOff className="w-3 h-3" /> Modo Local
-                   </span>
-                 )}
+                 <span className={`flex items-center gap-1 text-[9px] font-bold uppercase tracking-widest ${syncStatus === 'synced' ? 'text-green-400' : syncStatus === 'error' ? 'text-red-400' : 'text-blue-400'}`}>
+                   {syncStatus === 'syncing' ? <RefreshCw className="w-3 h-3 animate-spin" /> : <ShieldCheck className="w-3 h-3" />}
+                   {syncStatus === 'syncing' ? 'Sincronizando...' : syncStatus === 'error' ? 'Error Sync' : `Cloud: ${fleetId || 'No vinculado'}`}
+                 </span>
               </div>
             </div>
           </div>
-
-          <div className="flex items-center gap-4">
-            <button onClick={handleLogout} className="p-2 bg-red-500/10 text-red-400 rounded-xl hover:bg-red-500/20 transition-all">
-              <LogOut className="w-5 h-5" />
-            </button>
-          </div>
+          <button onClick={handleLogout} className="p-2 bg-red-500/10 text-red-400 rounded-xl hover:bg-red-500/20 transition-all"><LogOut className="w-5 h-5" /></button>
         </div>
         <div className="max-w-7xl mx-auto border-t border-slate-800 mt-4 flex overflow-x-auto no-scrollbar">
           {navItems.map(item => (
@@ -267,14 +267,17 @@ const App: React.FC = () => {
             priceHistory={priceHistory} 
             setPriceHistory={setPriceHistory} 
             isAdmin={role === 'admin'} 
-            syncId={idToken ? "Conectado" : "Local"} 
-            setSyncId={() => {}} 
+            syncId={fleetId} 
+            setSyncId={(id) => {
+              setFleetId(id);
+              if (idToken) pullData(idToken, id);
+            }} 
             onImportJSON={(data) => {
-              if (data.vehicles) setVehicles(data.vehicles);
-              if (data.workers) setWorkers(data.workers);
-              if (data.works) setWorks(data.works);
-              if (data.logs) setLogs(data.logs);
-              if (data.priceHistory) setPriceHistory(data.priceHistory);
+              setVehicles(data.vehicles || []);
+              setWorkers(data.workers || []);
+              setWorks(data.works || []);
+              setLogs(data.logs || []);
+              setPriceHistory(data.priceHistory || []);
             }}
             fullState={{ vehicles, workers, works, logs, priceHistory }}
           />

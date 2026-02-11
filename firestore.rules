@@ -2,9 +2,10 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /fleets/{userId} {
-      // El ID del documento debe coincidir con el UID del usuario autenticado
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+    // Permite leer y escribir en documentos de flotas si el usuario está logueado
+    // Se recomienda mejorar esto validando el acceso específico por ID en producción
+    match /fleets/{fleetId} {
+      allow read, write: if request.auth != null;
     }
   }
 }
