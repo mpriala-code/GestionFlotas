@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { 
   Vehicle, Worker, Work, LogEntry, TabType, 
-  MaintenanceStatus, WorkStatus, PriceRecord, AuthRole
+  MaintenanceStatus, WorkStatus, TripType, PriceRecord, AuthRole
 } from './types';
 import { 
   INITIAL_VEHICLES, INITIAL_WORKERS, INITIAL_WORKS, INITIAL_LOGS 
@@ -63,12 +63,13 @@ const getStorageItem = <T,>(key: string, defaultValue: T): T => {
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   
+  // Persisted local state
   const [role, setRole] = useState<AuthRole>(() => getStorageItem('fleet_role', 'none'));
   const [currentUser, setCurrentUser] = useState<Worker | null>(() => getStorageItem('fleet_current_user', null));
   const [syncId, setSyncId] = useState<string>(() => getStorageItem('fleet_sync_id', ''));
   const [isSyncing, setIsSyncing] = useState(false);
-  const [syncError, setSyncError] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+  const [isOnline, setIsOnline] = useState(true);
 
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginType, setLoginType] = useState<AuthRole>('worker');
@@ -87,99 +88,124 @@ const App: React.FC = () => {
   const [logs, setLogs] = useState<LogEntry[]>(() => getStorageItem('fleet_logs', INITIAL_LOGS));
 
   const isAdmin = role === 'admin';
-  const isInitialMount = useRef(true);
+  const lastUpdateRef = useRef<number>(Date.now());
 
-  // --- Nube: JSONBlob Polling & Sync ---
-  const pullFromCloud = useCallback(async (currentSyncId: string) => {
-    if (!currentSyncId || isSyncing) return;
-    setIsSyncing(true);
+  // --- CLOUD SYNC LOGIC ---
+
+  const pullFromCloud = useCallback(async (currentSyncId: string, quiet = false) => {
+    if (!currentSyncId) return;
+    if (!quiet) setIsSyncing(true);
     try {
-      const response = await fetch(`https://jsonblob.com/api/jsonBlob/${currentSyncId}`);
+      const response = await fetch(`https://api.npoint.io/${currentSyncId}`);
       if (response.ok) {
         const remoteData = await response.json();
         
-        // Solo actualizar si hay datos y son diferentes (comparación simple por longitud para no saturar)
-        if (remoteData.workers && JSON.stringify(remoteData.workers) !== JSON.stringify(workers)) setWorkers(remoteData.workers);
-        if (remoteData.vehicles && JSON.stringify(remoteData.vehicles) !== JSON.stringify(vehicles)) setVehicles(remoteData.vehicles);
-        if (remoteData.works && JSON.stringify(remoteData.works) !== JSON.stringify(works)) setWorks(remoteData.works);
-        if (remoteData.logs && JSON.stringify(remoteData.logs) !== JSON.stringify(logs)) setLogs(remoteData.logs);
-        if (remoteData.priceHistory) setPriceHistory(remoteData.priceHistory);
-        
-        setLastSyncTime(new Date());
-        setSyncError(false);
-      } else {
-        setSyncError(true);
+        // Solo actualizamos si los datos remotos son más nuevos que nuestra última actualización local
+        if (remoteData.lastUpdated && remoteData.lastUpdated > lastUpdateRef.current) {
+          if (remoteData.vehicles) setVehicles(remoteData.vehicles);
+          if (remoteData.workers) setWorkers(remoteData.workers);
+          if (remoteData.works) setWorks(remoteData.works);
+          if (remoteData.logs) setLogs(remoteData.logs);
+          if (remoteData.priceHistory) setPriceHistory(remoteData.priceHistory);
+          lastUpdateRef.current = remoteData.lastUpdated;
+          setLastSyncTime(new Date());
+        }
       }
+      setIsOnline(true);
     } catch (e) {
-      setSyncError(true);
+      console.error("Error descargando de la nube:", e);
+      setIsOnline(false);
     } finally {
-      setIsSyncing(false);
+      if (!quiet) setIsSyncing(false);
     }
-  }, [syncId, workers, vehicles, works, logs, priceHistory]);
+  }, []);
 
-  const pushToCloud = useCallback(async (currentSyncId: string) => {
+  const pushToCloud = useCallback(async (currentSyncId: string, data: any) => {
     if (!currentSyncId) return;
     setIsSyncing(true);
     try {
-      const data = { vehicles, workers, works, logs, priceHistory };
-      const response = await fetch(`https://jsonblob.com/api/jsonBlob/${currentSyncId}`, {
-        method: 'PUT',
+      const timestamp = Date.now();
+      const payload = { ...data, lastUpdated: timestamp };
+      
+      const response = await fetch(`https://api.npoint.io/${currentSyncId}`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
+        body: JSON.stringify(payload)
       });
+      
       if (response.ok) {
+        lastUpdateRef.current = timestamp;
         setLastSyncTime(new Date());
-        setSyncError(false);
-      } else {
-        setSyncError(true);
+        setIsOnline(true);
       }
     } catch (e) {
-      setSyncError(true);
+      console.error("Error sincronizando con la nube:", e);
+      setIsOnline(false);
     } finally {
       setIsSyncing(false);
     }
-  }, [vehicles, workers, works, logs, priceHistory]);
+  }, []);
 
-  // Efecto de Polling: Revisar la nube cada 15 segundos
+  // Sync initialization
+  useEffect(() => {
+    if (syncId) {
+      pullFromCloud(syncId);
+    }
+  }, [syncId, pullFromCloud]);
+
+  // AUTO-POLLING: Comprueba la nube cada 10 segundos para ver si hay cambios de otros usuarios
   useEffect(() => {
     if (!syncId) return;
-    
-    // Pull inicial
-    pullFromCloud(syncId);
 
     const interval = setInterval(() => {
-      pullFromCloud(syncId);
-    }, 15000); 
+      pullFromCloud(syncId, true);
+    }, 10000); // 10 segundos
 
     return () => clearInterval(interval);
-  }, [syncId]);
+  }, [syncId, pullFromCloud]);
 
-  // Efecto de Empuje: Cuando cambian los datos locales, subir a la nube (Debounced)
+  // Auto-save locales
   useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
-
-    if (syncId) {
-      const timeout = setTimeout(() => {
-        pushToCloud(syncId);
-      }, 3000); // 3 segundos de calma antes de subir
-      return () => clearTimeout(timeout);
-    }
-  }, [vehicles, workers, works, logs, priceHistory, syncId]);
-
-  // Persistencia local (Copia de seguridad en el navegador)
-  useEffect(() => { localStorage.setItem('fleet_vehicles', JSON.stringify(vehicles)); }, [vehicles]);
-  useEffect(() => { localStorage.setItem('fleet_workers', JSON.stringify(workers)); }, [workers]);
-  useEffect(() => { localStorage.setItem('fleet_works', JSON.stringify(works)); }, [works]);
-  useEffect(() => { localStorage.setItem('fleet_logs', JSON.stringify(logs)); }, [logs]);
-  useEffect(() => { localStorage.setItem('fleet_price_history', JSON.stringify(priceHistory)); }, [priceHistory]);
-  useEffect(() => {
+    localStorage.setItem('fleet_vehicles', JSON.stringify(vehicles));
+    localStorage.setItem('fleet_workers', JSON.stringify(workers));
+    localStorage.setItem('fleet_works', JSON.stringify(works));
+    localStorage.setItem('fleet_logs', JSON.stringify(logs));
+    localStorage.setItem('fleet_price_history', JSON.stringify(priceHistory));
     localStorage.setItem('fleet_role', JSON.stringify(role));
     localStorage.setItem('fleet_current_user', JSON.stringify(currentUser));
     localStorage.setItem('fleet_sync_id', JSON.stringify(syncId));
-  }, [role, currentUser, syncId]);
+  }, [vehicles, workers, works, logs, priceHistory, role, currentUser, syncId]);
+
+  // AUTO-PUSH: Sube cambios automáticamente cuando el ADMIN modifica algo
+  useEffect(() => {
+    if (syncId && isAdmin) {
+      const timeout = setTimeout(() => {
+        pushToCloud(syncId, { vehicles, workers, works, logs, priceHistory });
+      }, 3000); // Espera 3 segundos de inactividad para no saturar la API
+      return () => clearTimeout(timeout);
+    }
+  }, [vehicles, workers, works, logs, priceHistory, syncId, isAdmin, pushToCloud]);
+
+  // URL Hash sharing (One-time import)
+  useEffect(() => {
+    const hash = window.location.hash.substring(1);
+    if (hash && hash.length > 10) {
+      try {
+        const decompressed = LZString.decompressFromEncodedURIComponent(hash);
+        if (decompressed) {
+          const remoteData = JSON.parse(decompressed);
+          if (confirm('Se ha compartido una configuración contigo. ¿Deseas importarla?')) {
+            if (remoteData.vehicles) setVehicles(remoteData.vehicles);
+            if (remoteData.workers) setWorkers(remoteData.workers);
+            if (remoteData.works) setWorks(remoteData.works);
+            if (remoteData.logs) setLogs(remoteData.logs);
+            if (remoteData.priceHistory) setPriceHistory(remoteData.priceHistory);
+            window.location.hash = '';
+          }
+        }
+      } catch (e) {}
+    }
+  }, []);
 
   const alerts = useMemo((): Alert[] => {
     const today = new Date();
@@ -189,94 +215,139 @@ const App: React.FC = () => {
     const results: Alert[] = [];
     vehicles.forEach(v => {
       const checkDates = [
-        { d: v.itvDate, l: 'ITV' },
-        { d: v.insuranceExpiry, l: 'Seguro' },
-        { d: v.nextMaintenance, l: 'Manto.' },
-        { d: v.taxDate, l: 'Impuesto' },
+        { dateStr: v.itvDate, label: 'ITV' },
+        { dateStr: v.insuranceExpiry, label: 'Seguro' },
+        { dateStr: v.nextMaintenance, label: 'Mantenimiento' },
+        { dateStr: v.taxDate, label: 'Impuesto' },
       ];
-      checkDates.forEach(cd => {
-        if (cd.d) {
-          const ad = new Date(cd.d);
-          if (ad < today) results.push({ id: `${v.id}-${cd.l}`, plate: v.plate, model: v.model, reason: `${cd.l} caducada`, type: 'danger' });
-          else if (ad <= threshold) results.push({ id: `${v.id}-${cd.l}`, plate: v.plate, model: v.model, reason: `${cd.l} próximo`, type: 'warning' });
+      checkDates.forEach(d => {
+        if (d.dateStr) {
+          const alertDate = new Date(d.dateStr);
+          alertDate.setHours(0, 0, 0, 0);
+          if (!isNaN(alertDate.getTime())) {
+            if (alertDate < today) results.push({ id: `${v.id}-${d.label}`, plate: v.plate, model: v.model, reason: `${d.label} caducada`, type: 'danger' });
+            else if (alertDate <= threshold) results.push({ id: `${v.id}-${d.label}`, plate: v.plate, model: v.model, reason: `${d.label} próximo`, type: 'warning' });
+          }
         }
       });
     });
     return results;
   }, [vehicles]);
 
-  const navItems = [
-    { id: 'dashboard', label: 'Panel', icon: LayoutDashboard },
-    { id: 'vehicles', label: 'Flota', icon: Truck },
-    { id: 'workers', label: 'Personal', icon: Users },
-    { id: 'works', label: 'Obras', icon: HardHat },
-    { id: 'logs', label: 'Registros', icon: ClipboardList },
-    { id: 'stats', label: 'Estadísticas', icon: BarChart3 },
-    { id: 'maintenance', label: 'Mantenimiento', icon: Wrench },
-    { id: 'settings', label: 'Ajustes', icon: SettingsIcon },
-  ];
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (loginType === 'admin') {
+      if (loginUsername === 'admin' && loginPassword === 'admin123') {
+        setRole('admin'); setCurrentUser(null); setShowLoginModal(false);
+      } else alert('Error en admin');
+    } else {
+      const found = workers.find(w => w.username === loginUsername && w.password === loginPassword);
+      if (found) {
+        setRole('worker'); setCurrentUser(found); setShowLoginModal(false);
+      } else alert('Error en trabajador');
+    }
+    setLoginUsername(''); setLoginPassword('');
+  };
 
-  const visibleNav = useMemo(() => {
-    if (role === 'worker') return navItems.filter(i => i.id === 'logs' || i.id === 'dashboard');
-    if (role === 'none') return navItems.filter(i => i.id === 'dashboard');
-    return navItems;
+  const navItems = useMemo(() => {
+    const items = [
+      { id: 'dashboard', label: 'Panel', icon: LayoutDashboard },
+      { id: 'vehicles', label: 'Vehículos', icon: Truck },
+      { id: 'workers', label: 'Trabajadores', icon: Users },
+      { id: 'works', label: 'Obras', icon: HardHat },
+      { id: 'logs', label: 'Registros', icon: ClipboardList },
+      { id: 'stats', label: 'Estadísticas', icon: BarChart3 },
+      { id: 'maintenance', label: 'Mantenimiento', icon: Wrench },
+      { id: 'settings', label: 'Ajustes', icon: SettingsIcon },
+    ];
+    if (role === 'worker') return items.filter(i => i.id === 'logs');
+    if (role === 'none') return items.filter(i => i.id === 'dashboard');
+    return items;
   }, [role]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-950 text-slate-50 selection:bg-blue-500/30">
-      <header className="bg-slate-900/80 backdrop-blur-md border-b border-slate-800 sticky top-0 z-40">
+    <div className="min-h-screen flex flex-col bg-slate-950 text-slate-50">
+      <header className="bg-slate-900/50 backdrop-blur-xl border-b border-slate-800 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="bg-blue-600 p-2 rounded-xl shadow-lg shadow-blue-600/20"><Truck className="w-5 h-5 text-white" /></div>
-            <div>
-              <h1 className="text-lg font-bold tracking-tight">FleetMaster AI</h1>
-              {syncId && (
-                <div className={`flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider ${syncError ? 'text-red-400' : 'text-green-400'}`}>
-                  {syncError ? <WifiOff className="w-2 h-2" /> : <Wifi className="w-2 h-2" />}
-                  {syncError ? 'Desconectado' : 'Sincronizado'}
-                </div>
-              )}
+          <div className="flex items-center gap-2">
+            <div className="bg-blue-600 p-2 rounded-lg"><Truck className="w-5 h-5 text-white" /></div>
+            <div className="flex flex-col">
+              <h1 className="text-xl font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent leading-tight">FleetMaster AI</h1>
+              <div className="flex items-center gap-1.5">
+                 {syncId ? (
+                    <div className="flex items-center gap-1 text-[9px] text-green-400 uppercase font-bold tracking-widest">
+                      <Wifi className="w-2.5 h-2.5" />
+                      En Línea
+                    </div>
+                 ) : (
+                    <div className="flex items-center gap-1 text-[9px] text-slate-500 uppercase font-bold tracking-widest">
+                      <WifiOff className="w-2.5 h-2.5" />
+                      Local
+                    </div>
+                 )}
+              </div>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
             {syncId && (
-              <button 
-                onClick={() => pullFromCloud(syncId)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all ${syncError ? 'bg-red-500/10 border-red-500/30' : 'bg-slate-800/50 border-slate-700'}`}
-              >
-                <div className={`w-1.5 h-1.5 rounded-full ${isSyncing ? 'bg-blue-500 animate-pulse' : syncError ? 'bg-red-500' : 'bg-green-500'}`} />
-                <span className="text-[10px] font-bold text-slate-400">
-                  {isSyncing ? 'Sync...' : lastSyncTime ? lastSyncTime.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : 'Conectado'}
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 rounded-full border border-slate-700">
+                <div className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-blue-500 animate-pulse' : isOnline ? 'bg-green-500' : 'bg-red-500'}`} />
+                <span className="text-[10px] font-bold text-slate-400 hidden sm:inline">
+                  {isSyncing ? 'Sincronizando...' : isOnline ? `Live: ${lastSyncTime?.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) || 'Conectado'}` : 'Sin Conexión'}
                 </span>
-                <RefreshCw className={`w-3 h-3 text-slate-400 ${isSyncing ? 'animate-spin' : ''}`} />
+                <button 
+                  onClick={() => pullFromCloud(syncId)} 
+                  disabled={isSyncing}
+                  className="p-1 hover:bg-slate-700 rounded-md transition-colors disabled:opacity-30" 
+                  title="Actualizar datos ahora"
+                >
+                  <RefreshCw className={`w-3 h-3 text-slate-400 ${isSyncing ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+            )}
+
+            {isAdmin && (
+               <button 
+                onClick={() => {
+                  const data = { vehicles, workers, works, logs, priceHistory };
+                  const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(data));
+                  const url = `${window.location.origin}${window.location.pathname}#${compressed}`;
+                  navigator.clipboard.writeText(url);
+                  alert("¡Enlace de sesión copiado! Otros verán estos datos al entrar.");
+                }}
+                className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg border border-slate-700 flex items-center gap-2 text-xs font-bold"
+                title="Generar enlace de sesión"
+              >
+                <Share2 className="w-4 h-4" />
+                <span className="hidden lg:inline">Compartir</span>
               </button>
             )}
 
             {role === 'none' ? (
-              <button onClick={() => setShowLoginModal(true)} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 shadow-lg shadow-blue-600/20">Acceso</button>
+              <button onClick={() => setShowLoginModal(true)} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-sm font-bold shadow-lg">Acceder</button>
             ) : (
-              <div className="flex items-center gap-3 pl-3 border-l border-slate-800">
-                <div className="hidden sm:block text-right">
-                  <p className="text-[10px] font-bold text-slate-200">{role === 'admin' ? 'Administrador' : currentUser?.name}</p>
-                  <p className="text-[8px] text-slate-500 uppercase">{role}</p>
+              <div className="flex items-center gap-4">
+                <div className="hidden md:flex flex-col items-end">
+                  <span className="text-xs font-bold">{role === 'admin' ? 'Admin' : currentUser?.name}</span>
+                  <span className="text-[9px] text-slate-500 uppercase">{role}</span>
                 </div>
-                <button onClick={() => { if(confirm('¿Cerrar sesión?')) setRole('none'); }} className="p-2 hover:bg-red-500/10 text-slate-400 hover:text-red-400 rounded-lg transition-colors"><LogOut className="w-4 h-4" /></button>
+                <button onClick={() => { if(confirm('¿Salir?')) setRole('none'); }} className="p-2 bg-red-500/10 text-red-400 rounded-lg border border-red-500/20"><LogOut className="w-4 h-4" /></button>
               </div>
             )}
           </div>
         </div>
-        <div className="max-w-7xl mx-auto px-4 border-t border-slate-800 flex overflow-x-auto no-scrollbar scroll-smooth">
-          {visibleNav.map(item => (
-            <button key={item.id} onClick={() => setActiveTab(item.id as TabType)} className={`flex items-center gap-2 px-6 py-4 text-xs font-bold transition-all relative whitespace-nowrap ${activeTab === item.id ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}>
-              <item.icon className={`w-4 h-4 ${activeTab === item.id ? 'text-blue-500' : 'text-slate-600'}`} /> {item.label}
+        <div className="max-w-7xl mx-auto px-4 border-t border-slate-800 flex overflow-x-auto no-scrollbar">
+          {navItems.map(item => (
+            <button key={item.id} onClick={() => setActiveTab(item.id as TabType)} className={`flex items-center gap-2 px-6 py-4 text-sm font-medium transition-all relative whitespace-nowrap ${activeTab === item.id ? 'text-blue-400' : 'text-slate-400'}`}>
+              <item.icon className="w-4 h-4" /> {item.label}
               {activeTab === item.id && <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-500 rounded-t-full" />}
             </button>
           ))}
         </div>
       </header>
 
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-6">
+      <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-8">
         {activeTab === 'dashboard' && <Dashboard vehicles={vehicles} workers={workers} works={works} logs={logs} alerts={alerts} priceHistory={priceHistory} />}
         {activeTab === 'vehicles' && <Vehicles vehicles={vehicles} setVehicles={setVehicles} isAdmin={isAdmin} />}
         {activeTab === 'workers' && <Workers workers={workers} setWorkers={setWorkers} isAdmin={isAdmin} />}
@@ -285,38 +356,38 @@ const App: React.FC = () => {
         {activeTab === 'stats' && <Stats logs={logs} vehicles={vehicles} workers={workers} works={works} priceHistory={priceHistory} />}
         {activeTab === 'maintenance' && <Maintenance vehicles={vehicles} setVehicles={setVehicles} isAdmin={isAdmin} alerts={alerts} />}
         {activeTab === 'settings' && <Settings 
-          priceHistory={priceHistory} setPriceHistory={setPriceHistory} 
-          isAdmin={isAdmin} syncId={syncId} setSyncId={setSyncId}
+          priceHistory={priceHistory} 
+          setPriceHistory={setPriceHistory} 
+          isAdmin={isAdmin} 
+          syncId={syncId}
+          setSyncId={setSyncId}
+          onImportJSON={(data) => {
+            if(data.vehicles) setVehicles(data.vehicles);
+            if(data.workers) setWorkers(data.workers);
+            if(data.works) setWorks(data.works);
+            if(data.logs) setLogs(data.logs);
+            if(data.priceHistory) setPriceHistory(data.priceHistory);
+            // Al importar manualmente forzamos una subida si hay syncId
+            if (syncId && isAdmin) pushToCloud(syncId, data);
+          }} 
           fullState={{vehicles, workers, works, logs, priceHistory}} 
-          onImportJSON={(d) => { if(d.vehicles) setVehicles(d.vehicles); if(d.workers) setWorkers(d.workers); if(d.works) setWorks(d.works); if(d.logs) setLogs(d.logs); if(d.priceHistory) setPriceHistory(d.priceHistory); }}
         />}
       </main>
 
       {showLoginModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 max-w-md w-full shadow-2xl">
-            <h2 className="text-xl font-bold mb-6 text-center">Acceso al Sistema</h2>
-            <div className="flex bg-slate-800/50 p-1 rounded-xl mb-6 border border-slate-700">
-              <button onClick={() => setLoginType('worker')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${loginType === 'worker' ? 'bg-blue-600 shadow-lg' : 'text-slate-500'}`}>Trabajador</button>
-              <button onClick={() => setLoginType('admin')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${loginType === 'admin' ? 'bg-blue-600 shadow-lg' : 'text-slate-500'}`}>Admin</button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 max-w-md w-full animate-in zoom-in-95">
+            <h2 className="text-2xl font-bold mb-6 text-center">Identificación</h2>
+            <div className="flex bg-slate-800 p-1 rounded-xl mb-6">
+              <button onClick={() => setLoginType('worker')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${loginType === 'worker' ? 'bg-blue-600' : 'text-slate-400'}`}>Trabajador</button>
+              <button onClick={() => setLoginType('admin')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${loginType === 'admin' ? 'bg-blue-600' : 'text-slate-400'}`}>Admin</button>
             </div>
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              if (loginType === 'admin') {
-                if (loginUsername === 'admin' && loginPassword === 'admin123') { setRole('admin'); setShowLoginModal(false); }
-                else alert('Credenciales de administrador incorrectas');
-              } else {
-                const found = workers.find(w => w.username === loginUsername && w.password === loginPassword);
-                if (found) { setRole('worker'); setCurrentUser(found); setShowLoginModal(false); }
-                else alert('Usuario o contraseña de trabajador incorrectos');
-              }
-              setLoginUsername(''); setLoginPassword('');
-            }} className="space-y-4">
-              <input required value={loginUsername} onChange={e => setLoginUsername(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm" placeholder="Nombre de usuario" />
-              <input required type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm" placeholder="Contraseña" />
+            <form onSubmit={handleLogin} className="space-y-4">
+              <input required value={loginUsername} onChange={e => setLoginUsername(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white" placeholder="Usuario" />
+              <input required type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white" placeholder="Contraseña" />
               <div className="flex gap-3 pt-4">
-                <button type="button" onClick={() => setShowLoginModal(false)} className="flex-1 bg-slate-800 py-3 rounded-xl text-xs font-bold">Cerrar</button>
-                <button type="submit" className="flex-1 bg-blue-600 py-3 rounded-xl text-xs font-bold shadow-lg shadow-blue-600/20">Iniciar Sesión</button>
+                <button type="button" onClick={() => setShowLoginModal(false)} className="flex-1 bg-slate-800 py-3 rounded-xl">Cerrar</button>
+                <button type="submit" className="flex-1 bg-blue-600 py-3 rounded-xl font-bold shadow-lg shadow-blue-600/30">Entrar</button>
               </div>
             </form>
           </div>
