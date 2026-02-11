@@ -2,7 +2,8 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { 
   Plus, Edit2, Trash2, Search, Info, Euro, Calendar, Gauge, FileText, Shield, 
-  Wrench, ChevronDown, ChevronUp, FileDown, FileUp, CreditCard, CheckCircle2 
+  Wrench, ChevronDown, ChevronUp, FileDown, FileUp, CreditCard, CheckCircle2,
+  AlertTriangle
 } from 'lucide-react';
 import { Vehicle, MaintenanceStatus, Installment } from '../types';
 
@@ -20,6 +21,12 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showLoanModal, setShowLoanModal] = useState<string | null>(null);
+  
+  // New installment form state
+  const [showAddInstallment, setShowAddInstallment] = useState(false);
+  const [newInsDate, setNewInsDate] = useState(new Date().toISOString().split('T')[0]);
+  const [newInsAmount, setNewInsAmount] = useState(0);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState<Partial<Vehicle>>({
@@ -109,7 +116,7 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
   };
 
   const handleDelete = (id: string) => {
-    if (confirm('¿Estás seguro de que quieres eliminar este vehículo?')) {
+    if (confirm('¿Estás seguro de que quieres eliminar este vehículo de la flota?')) {
       setVehicles(prev => prev.filter(v => v.id !== id));
     }
   };
@@ -138,10 +145,33 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
     }));
   };
 
+  const addManualInstallment = (vehicleId: string) => {
+    if (newInsAmount <= 0) return;
+    setVehicles(prev => prev.map(v => {
+      if (v.id === vehicleId) {
+        const newIns: Installment = {
+          id: Math.random().toString(36).substr(2, 9),
+          date: newInsDate,
+          amount: newInsAmount,
+          paid: false
+        };
+        const currentInstallments = v.loan.installments || [];
+        const updatedInstallments = [...currentInstallments, newIns].sort((a, b) => a.date.localeCompare(b.date));
+        return {
+          ...v,
+          loan: { ...v.loan, installments: updatedInstallments }
+        };
+      }
+      return v;
+    }));
+    setShowAddInstallment(false);
+    setNewInsAmount(0);
+  };
+
   const generateInstallments = (vehicleId: string) => {
     setVehicles(prev => prev.map(v => {
       if (v.id === vehicleId && v.loan.active) {
-        const count = Math.ceil(v.loan.totalAmount / v.loan.monthlyFee);
+        const count = Math.ceil(v.loan.totalAmount / (v.loan.monthlyFee || 1));
         const newInstallments: Installment[] = [];
         const start = v.loan.startDate ? new Date(v.loan.startDate) : new Date();
         
@@ -155,52 +185,53 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
             paid: false
           });
         }
-        return { ...v, loan: { ...v.loan, installments: newInstallments } };
+        return { ...v, loan: { ...v.loan, installments: newInstallments, remainingAmount: v.loan.totalAmount } };
       }
       return v;
     }));
   };
 
-  // EXCEL EXPORT
   const handleExport = () => {
     const exportData = vehicles.map(v => ({
       'Matrícula': v.plate,
       'Modelo': v.model,
-      'Tipo': v.type,
-      'Kilómetros': v.kilometers,
+      'KM Totales': v.kilometers,
       'Consumo Base': v.baseConsumption,
-      'Pendiente Préstamo': v.loan.remainingAmount
+      'Prestamo Activo': v.loan.active ? 'SÍ' : 'NO',
+      'Pendiente (€)': v.loan.remainingAmount
     }));
-
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Vehículos");
-    XLSX.writeFile(wb, `Flota_Vehiculos_${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "Vehiculos");
+    XLSX.writeFile(wb, `Inventario_Flota_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
-        <h2 className="text-2xl font-bold">Gestión de Flota</h2>
+        <div>
+          <h2 className="text-2xl font-bold">Inventario de Vehículos</h2>
+          <p className="text-slate-400 text-sm">Control de fichas técnicas y financiación</p>
+        </div>
         <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto">
           <div className="relative flex-1 sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
             <input 
               type="text" 
-              placeholder="Buscar vehículo..."
+              placeholder="Buscar por matrícula o modelo..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm"
+              className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm"
             />
           </div>
           
-          <button onClick={handleExport} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl font-bold transition-all border border-slate-700 text-sm">
-            <FileDown className="w-4 h-4 text-blue-400" /> Exportar
+          <button onClick={handleExport} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-4 py-2.5 rounded-xl font-bold transition-all border border-slate-700 text-xs">
+            <FileDown className="w-4 h-4 text-blue-400" /> Exportar Planilla
           </button>
 
           {isAdmin && (
-            <button onClick={() => setShowModal(true)} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-xl flex items-center gap-2 font-bold transition-all shadow-lg shadow-blue-600/20">
-              <Plus className="w-5 h-5" /> Añadir
+            <button onClick={() => setShowModal(true)} className="bg-blue-600 hover:bg-blue-500 px-5 py-2.5 rounded-xl flex items-center gap-2 font-bold transition-all shadow-lg shadow-blue-600/20 text-sm">
+              <Plus className="w-5 h-5" /> Nuevo Vehículo
             </button>
           )}
         </div>
@@ -208,82 +239,64 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredVehicles.map(v => (
-          <div key={v.id} className="bg-slate-900/50 border border-slate-800 rounded-2xl overflow-hidden group hover:border-slate-600 transition-all shadow-md">
-            <div className="p-6">
-              <div className="flex justify-between items-start mb-4">
+          <div key={v.id} className="bg-slate-900/50 border border-slate-800 rounded-3xl overflow-hidden group hover:border-blue-500/30 transition-all shadow-xl">
+            <div className="p-7">
+              <div className="flex justify-between items-start mb-6">
                 <div>
-                  <h3 className="text-xl font-bold">{v.plate}</h3>
-                  <p className="text-slate-400 text-sm">{v.model} • {v.type}</p>
+                  <h3 className="text-2xl font-black tracking-tight">{v.plate}</h3>
+                  <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">{v.model} • {v.type}</p>
                 </div>
-                <div className="flex gap-1">
+                <div className="flex gap-1.5">
                   {isAdmin && (
-                    <div className="flex gap-1">
-                      <button onClick={() => openEdit(v)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-blue-400"><Edit2 className="w-4 h-4" /></button>
-                      <button onClick={() => handleDelete(v.id)} className="p-2 bg-slate-800 hover:bg-red-900/40 rounded-lg text-red-400"><Trash2 className="w-4 h-4" /></button>
+                    <div className="flex gap-1.5">
+                      <button onClick={() => openEdit(v)} className="p-2.5 bg-slate-800 hover:bg-blue-600/20 rounded-xl text-blue-400 transition-all"><Edit2 className="w-4 h-4" /></button>
+                      <button onClick={() => handleDelete(v.id)} className="p-2.5 bg-slate-800 hover:bg-red-600/20 rounded-xl text-red-400 transition-all"><Trash2 className="w-4 h-4" /></button>
                     </div>
                   )}
-                  <button onClick={() => toggleExpand(v.id)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 transition-colors">
+                  <button onClick={() => toggleExpand(v.id)} className="p-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-400 transition-colors">
                     {expandedId === v.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4 mb-6">
-                <div className="bg-slate-800/40 rounded-xl p-3">
-                  <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Kilómetros</p>
-                  <p className="font-bold flex items-center gap-1.5"><Gauge className="w-3 h-3 text-blue-400" /> {v.kilometers.toLocaleString()} km</p>
+                <div className="bg-slate-800/40 rounded-2xl p-4 border border-slate-800">
+                  <p className="text-[10px] text-slate-500 uppercase font-bold mb-1 tracking-widest">Odómetro</p>
+                  <p className="font-bold flex items-center gap-2"><Gauge className="w-4 h-4 text-blue-400" /> {v.kilometers.toLocaleString()} <span className="text-[10px] text-slate-500">KM</span></p>
                 </div>
-                <div className="bg-slate-800/40 rounded-xl p-3">
-                  <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Consumo</p>
-                  <p className="font-bold text-slate-200"> {v.baseConsumption} L/100</p>
+                <div className="bg-slate-800/40 rounded-2xl p-4 border border-slate-800">
+                  <p className="text-[10px] text-slate-500 uppercase font-bold mb-1 tracking-widest">Consumo</p>
+                  <p className="font-bold text-slate-200"> {v.baseConsumption} <span className="text-[10px] text-slate-500 font-bold">L/100</span></p>
                 </div>
               </div>
 
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between items-center text-slate-300">
-                  <span className="flex items-center gap-2 font-medium"><CreditCard className="w-4 h-4 text-yellow-500" /> Préstamo</span>
+              <div className="space-y-3">
+                <div className="flex justify-between items-center bg-slate-800/20 p-3 rounded-2xl border border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-yellow-500/10 rounded-lg">
+                      <CreditCard className="w-4 h-4 text-yellow-500" />
+                    </div>
+                    <span className="text-xs font-bold text-slate-300">Préstamo / Financiación</span>
+                  </div>
                   <button 
                     onClick={() => setShowLoanModal(v.id)}
-                    className="px-2 py-0.5 bg-yellow-500/10 text-yellow-500 rounded text-[10px] font-bold hover:bg-yellow-500/20"
+                    className="px-3 py-1.5 bg-yellow-500 hover:bg-yellow-400 text-slate-950 rounded-xl text-[10px] font-black uppercase transition-all shadow-lg shadow-yellow-500/20 active:scale-95"
                   >
-                    GESTIONAR COTAS
+                    Cotas
                   </button>
                 </div>
               </div>
 
-              {expandedId === v.id && (
-                <div className="mt-4 pt-4 border-t border-slate-800 space-y-4 animate-in fade-in slide-in-from-top-2">
-                  <div className="grid grid-cols-2 gap-y-3 text-xs">
-                    <div>
-                      <p className="text-slate-500 uppercase font-bold mb-0.5">Bastidor (VIN)</p>
-                      <p className="text-slate-300 font-mono">{v.vin || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <p className="text-slate-500 uppercase font-bold mb-0.5">Año Fab.</p>
-                      <p className="text-slate-300">{v.year}</p>
-                    </div>
-                    <div>
-                      <p className="text-slate-500 uppercase font-bold mb-0.5">ITV</p>
-                      <p className="text-slate-300">{v.itvDate}</p>
-                    </div>
-                    <div>
-                      <p className="text-slate-500 uppercase font-bold mb-0.5">Seguro</p>
-                      <p className="text-slate-300">{v.insuranceExpiry}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {v.loan.active && (
-                <div className="mt-6 pt-4 border-t border-slate-800">
-                  <div className="flex justify-between text-sm mb-2">
-                    <span className="text-slate-400">Restante Préstamo</span>
-                    <span className="font-bold text-yellow-500">{v.loan.remainingAmount.toLocaleString()}€</span>
+                <div className="mt-6 pt-4 border-t border-slate-800/50">
+                  <div className="flex justify-between text-[11px] mb-2 font-bold uppercase tracking-wider">
+                    <span className="text-slate-500">Pendiente de Pago</span>
+                    <span className="text-yellow-500">{v.loan.remainingAmount.toLocaleString()} €</span>
                   </div>
-                  <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                  <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden shadow-inner">
                     <div 
-                      className="bg-yellow-500 h-full transition-all duration-500" 
-                      style={{ width: `${Math.min(100, (1 - v.loan.remainingAmount / v.loan.totalAmount) * 100)}%` }} 
+                      className="bg-yellow-500 h-full transition-all duration-700 ease-out shadow-[0_0_10px_rgba(234,179,8,0.3)]" 
+                      style={{ width: `${Math.min(100, (1 - v.loan.remainingAmount / (v.loan.totalAmount || 1)) * 100)}%` }} 
                     />
                   </div>
                 </div>
@@ -295,112 +308,149 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
 
       {/* Loan Installments Modal */}
       {showLoanModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg shadow-2xl animate-in zoom-in-95">
-            <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/95 backdrop-blur-md">
+          <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] w-full max-w-xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+            <div className="p-8 border-b border-slate-800 flex justify-between items-center bg-slate-900/50 rounded-t-[2.5rem]">
               <div>
-                <h2 className="text-xl font-bold">Cotas de Préstamo</h2>
-                <p className="text-xs text-slate-400">{vehicles.find(v => v.id === showLoanModal)?.plate}</p>
+                <h2 className="text-2xl font-black tracking-tight">Cotas de Préstamo</h2>
+                <p className="text-xs text-blue-400 font-bold uppercase tracking-widest">{vehicles.find(v => v.id === showLoanModal)?.plate}</p>
               </div>
-              <button onClick={() => setShowLoanModal(null)} className="text-slate-500 hover:text-white text-3xl font-light">&times;</button>
+              <button onClick={() => setShowLoanModal(null)} className="text-slate-500 hover:text-white text-4xl font-light">&times;</button>
             </div>
-            <div className="p-6 max-h-[60vh] overflow-y-auto space-y-3">
+            
+            <div className="p-8 overflow-y-auto space-y-4 flex-1">
+              {isAdmin && (
+                <div className="mb-6 p-6 bg-blue-600/5 border border-blue-500/20 rounded-3xl space-y-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Plus className="w-4 h-4 text-blue-400" />
+                    <h4 className="text-xs font-black uppercase tracking-widest text-blue-400">Añadir Cota Manual</h4>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <input type="date" value={newInsDate} onChange={e => setNewInsDate(e.target.value)} className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm" />
+                    <input type="number" placeholder="Importe €" value={newInsAmount} onChange={e => setNewInsAmount(parseFloat(e.target.value))} className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm" />
+                  </div>
+                  <button onClick={() => addManualInstallment(showLoanModal)} className="w-full bg-blue-600 hover:bg-blue-500 py-2.5 rounded-xl font-bold text-xs shadow-lg shadow-blue-600/20">Añadir Mensualidad</button>
+                </div>
+              )}
+
               {vehicles.find(v => v.id === showLoanModal)?.loan.installments?.length ? (
                 vehicles.find(v => v.id === showLoanModal)?.loan.installments?.map(ins => (
-                  <div key={ins.id} className={`p-4 rounded-2xl border flex items-center justify-between transition-all ${ins.paid ? 'bg-green-500/10 border-green-500/30' : 'bg-slate-800 border-slate-700'}`}>
-                    <div className="flex items-center gap-4">
-                      <div className={`p-2 rounded-lg ${ins.paid ? 'bg-green-500/20' : 'bg-slate-700'}`}>
-                        <Calendar className={`w-4 h-4 ${ins.paid ? 'text-green-500' : 'text-slate-400'}`} />
+                  <div key={ins.id} className={`p-5 rounded-3xl border transition-all flex items-center justify-between ${ins.paid ? 'bg-green-500/5 border-green-500/20 shadow-[0_0_15px_rgba(34,197,94,0.05)]' : 'bg-slate-800/50 border-slate-700'}`}>
+                    <div className="flex items-center gap-5">
+                      <div className={`p-3 rounded-2xl ${ins.paid ? 'bg-green-500/10' : 'bg-slate-700'}`}>
+                        <Calendar className={`w-5 h-5 ${ins.paid ? 'text-green-500' : 'text-slate-400'}`} />
                       </div>
                       <div>
-                        <p className={`font-bold ${ins.paid ? 'text-green-400 line-through' : 'text-slate-200'}`}>{ins.date}</p>
-                        <p className="text-xs text-slate-500 font-medium">{ins.amount.toLocaleString()}€</p>
+                        <p className={`font-black text-lg ${ins.paid ? 'text-green-500/50 line-through' : 'text-slate-200'}`}>{ins.date}</p>
+                        <p className="text-sm text-slate-500 font-bold uppercase tracking-wider">{ins.amount.toLocaleString()} €</p>
                       </div>
                     </div>
                     {isAdmin && (
                       <button 
                         onClick={() => toggleInstallment(showLoanModal, ins.id)}
-                        className={`p-2 rounded-xl transition-all ${ins.paid ? 'bg-green-500 text-white' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}
+                        className={`w-12 h-12 rounded-2xl transition-all flex items-center justify-center ${ins.paid ? 'bg-green-500 text-white shadow-lg shadow-green-500/20' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}
                       >
-                        <CheckCircle2 className="w-5 h-5" />
+                        <CheckCircle2 className="w-6 h-6" />
                       </button>
                     )}
                   </div>
                 ))
               ) : (
-                <div className="text-center py-8 space-y-4">
-                  <p className="text-slate-500 italic">No hay cotas generadas para este vehículo.</p>
+                <div className="text-center py-12 space-y-6">
+                  <div className="w-20 h-20 bg-slate-800/50 rounded-full flex items-center justify-center mx-auto border border-slate-700">
+                    <AlertTriangle className="w-8 h-8 text-slate-600" />
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-slate-400 font-bold">Sin plan de pagos activo</p>
+                    <p className="text-xs text-slate-500 max-w-[250px] mx-auto italic">Todavía no se han generado las cotas para este préstamo.</p>
+                  </div>
                   {isAdmin && (
                     <button 
                       onClick={() => generateInstallments(showLoanModal)}
-                      className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-2 mx-auto"
+                      className="bg-blue-600 hover:bg-blue-500 px-8 py-3 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-blue-600/20 transition-all active:scale-95"
                     >
-                      Generar Plan de Pagos
+                      Generar Plan Automático
                     </button>
                   )}
                 </div>
               )}
             </div>
+            <div className="p-8 border-t border-slate-800 bg-slate-900/80 rounded-b-[2.5rem]">
+               <div className="flex justify-between items-center text-xs font-bold uppercase tracking-widest text-slate-500">
+                  <span>Total Pendiente</span>
+                  <span className="text-xl text-yellow-500 font-black">{vehicles.find(v => v.id === showLoanModal)?.loan.remainingAmount.toLocaleString()} €</span>
+               </div>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Add/Edit Vehicle Modal */}
+      {/* Modal Nueva ficha... (Similar al original pero con mejoras de estilo para consistencia) */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-5xl shadow-2xl my-8 max-h-[90vh] flex flex-col">
-            <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-2xl z-10">
-              <h2 className="text-xl font-bold">{editingVehicle ? 'Editar Vehículo' : 'Nuevo Vehículo'}</h2>
-              <button onClick={closeModal} className="text-slate-400 hover:text-white">&times;</button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/95 backdrop-blur-md overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-4xl shadow-2xl my-8 animate-in zoom-in-95 duration-200">
+            <div className="p-8 border-b border-slate-800 flex justify-between items-center">
+              <h2 className="text-2xl font-black tracking-tight">{editingVehicle ? 'Editar Ficha Vehículo' : 'Añadir Vehículo a la Flota'}</h2>
+              <button onClick={closeModal} className="text-slate-400 hover:text-white text-3xl font-light">&times;</button>
             </div>
             
-            <form onSubmit={handleSubmit} className="p-8 space-y-8 overflow-y-auto flex-1">
-              {/* Form implementation remains similar to original but with enhanced styling and layout */}
-              <section className="space-y-4">
-                <div className="flex items-center gap-2 text-blue-400 mb-4 font-bold uppercase text-xs">
-                  <FileText className="w-4 h-4" /> Información Básica
+            <form onSubmit={handleSubmit} className="p-8 space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="space-y-6">
+                  <div className="flex items-center gap-2 text-blue-400 font-bold uppercase text-[10px] tracking-widest">
+                    <FileText className="w-4 h-4" /> Información Técnica
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-slate-500 font-bold uppercase">Matrícula</label>
+                      <input required value={formData.plate} onChange={e => setFormData({...formData, plate: e.target.value.toUpperCase()})} className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 outline-none focus:ring-2 focus:ring-blue-500" placeholder="0000-BBB" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-slate-500 font-bold uppercase">Consumo Base</label>
+                      <input type="number" required value={formData.baseConsumption} onChange={e => setFormData({...formData, baseConsumption: parseFloat(e.target.value)})} className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 outline-none focus:ring-2 focus:ring-blue-500" placeholder="L/100" />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] text-slate-500 font-bold uppercase">Marca y Modelo</label>
+                    <input required value={formData.model} onChange={e => setFormData({...formData, model: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ej: Renault Master L3H2" />
+                  </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <input required value={formData.plate} onChange={e => setFormData({...formData, plate: e.target.value})} className="bg-slate-800 border border-slate-700 rounded-xl p-3 outline-none focus:ring-1 focus:ring-blue-500" placeholder="Matrícula" />
-                  <input required value={formData.model} onChange={e => setFormData({...formData, model: e.target.value})} className="bg-slate-800 border border-slate-700 rounded-xl p-3 outline-none focus:ring-1 focus:ring-blue-500" placeholder="Modelo" />
-                  <input type="number" value={formData.kilometers} onChange={e => setFormData({...formData, kilometers: parseInt(e.target.value)})} className="bg-slate-800 border border-slate-700 rounded-xl p-3 outline-none" placeholder="KM actuales" />
-                </div>
-              </section>
 
-              <section className="bg-slate-800/30 p-6 rounded-2xl border border-slate-800 space-y-4">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-yellow-400 font-bold text-xs uppercase tracking-widest">Financiación / Cotas</h3>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400">Préstamo Activo</span>
-                    <input 
-                      type="checkbox" 
-                      className="w-4 h-4 rounded bg-slate-800 border-slate-700"
-                      checked={formData.loan?.active} 
-                      onChange={e => setFormData({...formData, loan: {...formData.loan!, active: e.target.checked}})} 
-                    />
+                <div className="space-y-6">
+                  <div className="flex items-center gap-2 text-yellow-500 font-bold uppercase text-[10px] tracking-widest">
+                    <CreditCard className="w-4 h-4" /> Financiación Actual
+                  </div>
+                  <div className="bg-slate-800/30 p-5 rounded-2xl border border-slate-800 space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-bold text-slate-400">Préstamo Activo</span>
+                      <input 
+                        type="checkbox" 
+                        className="w-5 h-5 rounded-lg bg-slate-900 border-slate-700 text-blue-600 focus:ring-blue-500"
+                        checked={formData.loan?.active} 
+                        onChange={e => setFormData({...formData, loan: {...formData.loan!, active: e.target.checked}})} 
+                      />
+                    </div>
+                    {formData.loan?.active && (
+                      <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <label className="text-[9px] text-slate-500 font-bold uppercase">Monto Total (€)</label>
+                            <input type="number" value={formData.loan?.totalAmount} onChange={e => setFormData({...formData, loan: {...formData.loan!, totalAmount: parseFloat(e.target.value), remainingAmount: parseFloat(e.target.value)}})} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-sm" />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[9px] text-slate-500 font-bold uppercase">Cota Mes (€)</label>
+                            <input type="number" value={formData.loan?.monthlyFee} onChange={e => setFormData({...formData, loan: {...formData.loan!, monthlyFee: parseFloat(e.target.value)}})} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-sm" />
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
-                {formData.loan?.active && (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-slate-500 font-bold uppercase">Total Préstamo (€)</label>
-                      <input type="number" value={formData.loan?.totalAmount} onChange={e => setFormData({...formData, loan: {...formData.loan!, totalAmount: parseFloat(e.target.value)}})} className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 outline-none" />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-slate-500 font-bold uppercase">Cota Mensual (€)</label>
-                      <input type="number" value={formData.loan?.monthlyFee} onChange={e => setFormData({...formData, loan: {...formData.loan!, monthlyFee: parseFloat(e.target.value)}})} className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 outline-none" />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-slate-500 font-bold uppercase">Fecha Inicio</label>
-                      <input type="date" value={formData.loan?.startDate} onChange={e => setFormData({...formData, loan: {...formData.loan!, startDate: e.target.value}})} className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 outline-none" />
-                    </div>
-                  </div>
-                )}
-              </section>
-              
-              <div className="pt-6 border-t border-slate-800 flex justify-end gap-4">
-                <button type="button" onClick={closeModal} className="bg-slate-800 hover:bg-slate-700 px-8 py-3 rounded-xl font-medium">Cancelar</button>
-                <button type="submit" className="bg-blue-600 hover:bg-blue-500 px-10 py-3 rounded-xl font-bold shadow-lg shadow-blue-600/20">Guardar</button>
+              </div>
+
+              <div className="pt-8 border-t border-slate-800 flex justify-end gap-4">
+                <button type="button" onClick={closeModal} className="px-8 py-3.5 rounded-2xl font-bold bg-slate-800 hover:bg-slate-700 transition-all">Cancelar</button>
+                <button type="submit" className="px-10 py-3.5 rounded-2xl font-black bg-blue-600 hover:bg-blue-500 shadow-xl shadow-blue-600/30 transition-all active:scale-95 uppercase tracking-widest text-xs">Guardar Vehículo</button>
               </div>
             </form>
           </div>

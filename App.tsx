@@ -89,7 +89,9 @@ const App: React.FC = () => {
 
   const isAdmin = role === 'admin';
   const isWorker = role === 'worker';
-  const lastUpdateRef = useRef<number>(Date.now());
+  
+  // Track timestamps for LWW (Last Write Wins) strategy
+  const lastUpdateRef = useRef<number>(Number(localStorage.getItem('fleet_last_updated') || Date.now()));
 
   // --- CLOUD SYNC LOGIC ---
 
@@ -97,18 +99,21 @@ const App: React.FC = () => {
     if (!currentSyncId) return;
     if (!quiet) setIsSyncing(true);
     try {
-      const response = await fetch(`https://api.npoint.io/${currentSyncId}`);
+      const response = await fetch(`https://api.npoint.io/${currentSyncId}`, {
+        headers: { 'Cache-Control': 'no-cache' }
+      });
       if (response.ok) {
         const remoteData = await response.json();
-        
-        // Solo actualizamos si los datos remotos son más nuevos que nuestra última actualización local
+        // Solo actualizamos si los datos remotos son realmente más nuevos
         if (remoteData.lastUpdated && remoteData.lastUpdated > lastUpdateRef.current) {
           if (remoteData.vehicles) setVehicles(remoteData.vehicles);
           if (remoteData.workers) setWorkers(remoteData.workers);
           if (remoteData.works) setWorks(remoteData.works);
           if (remoteData.logs) setLogs(remoteData.logs);
           if (remoteData.priceHistory) setPriceHistory(remoteData.priceHistory);
+          
           lastUpdateRef.current = remoteData.lastUpdated;
+          localStorage.setItem('fleet_last_updated', remoteData.lastUpdated.toString());
           setLastSyncTime(new Date());
         }
       }
@@ -128,14 +133,16 @@ const App: React.FC = () => {
       const timestamp = Date.now();
       const payload = { ...data, lastUpdated: timestamp };
       
+      // npoint.io recomienda PUT para actualizar bins existentes
       const response = await fetch(`https://api.npoint.io/${currentSyncId}`, {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
       
       if (response.ok) {
         lastUpdateRef.current = timestamp;
+        localStorage.setItem('fleet_last_updated', timestamp.toString());
         setLastSyncTime(new Date());
         setIsOnline(true);
       }
@@ -154,12 +161,12 @@ const App: React.FC = () => {
     }
   }, [syncId, pullFromCloud]);
 
-  // AUTO-POLLING: Comprueba la nube cada 10 segundos
+  // AUTO-POLLING: Cada 8 segundos para mayor reactividad
   useEffect(() => {
     if (!syncId) return;
     const interval = setInterval(() => {
       pullFromCloud(syncId, true);
-    }, 10000);
+    }, 8000);
     return () => clearInterval(interval);
   }, [syncId, pullFromCloud]);
 
@@ -175,12 +182,12 @@ const App: React.FC = () => {
     localStorage.setItem('fleet_sync_id', JSON.stringify(syncId));
   }, [vehicles, workers, works, logs, priceHistory, role, currentUser, syncId]);
 
-  // AUTO-PUSH: Sincroniza cambios automáticamente tanto para ADMINS como para TRABAJADORES (al añadir registros)
+  // AUTO-PUSH: Sincroniza cambios automáticamente (debounce de 1.5s)
   useEffect(() => {
     if (syncId && (isAdmin || isWorker)) {
       const timeout = setTimeout(() => {
         pushToCloud(syncId, { vehicles, workers, works, logs, priceHistory });
-      }, 2000); 
+      }, 1500); 
       return () => clearTimeout(timeout);
     }
   }, [vehicles, workers, works, logs, priceHistory, syncId, isAdmin, isWorker, pushToCloud]);
@@ -222,6 +229,7 @@ const App: React.FC = () => {
       const found = workers.find(w => w.username === loginUsername && w.password === loginPassword);
       if (found) {
         setRole('worker'); setCurrentUser(found); setShowLoginModal(false);
+        setActiveTab('logs'); // Directo a registros
       } else alert('Error en trabajador');
     }
     setLoginUsername(''); setLoginPassword('');
@@ -255,12 +263,12 @@ const App: React.FC = () => {
                  {syncId ? (
                     <div className="flex items-center gap-1 text-[9px] text-green-400 uppercase font-bold tracking-widest">
                       <Wifi className="w-2.5 h-2.5 animate-pulse" />
-                      En Línea
+                      Sincronizado
                     </div>
                  ) : (
                     <div className="flex items-center gap-1 text-[9px] text-slate-500 uppercase font-bold tracking-widest">
                       <WifiOff className="w-2.5 h-2.5" />
-                      Local
+                      Modo Local
                     </div>
                  )}
               </div>
@@ -272,13 +280,13 @@ const App: React.FC = () => {
               <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 rounded-full border border-slate-700">
                 <div className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-blue-500 animate-pulse' : isOnline ? 'bg-green-500' : 'bg-red-500'}`} />
                 <span className="text-[10px] font-bold text-slate-400 hidden sm:inline">
-                  {isSyncing ? 'Sincronizando...' : isOnline ? `Live: ${lastSyncTime?.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) || 'Conectado'}` : 'Sin Conexión'}
+                  {isSyncing ? 'Guardando...' : isOnline ? `Nube OK: ${lastSyncTime?.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}` : 'Desconectado'}
                 </span>
                 <button 
                   onClick={() => pullFromCloud(syncId)} 
                   disabled={isSyncing}
                   className="p-1 hover:bg-slate-700 rounded-md transition-colors disabled:opacity-30" 
-                  title="Actualizar datos ahora"
+                  title="Refrescar datos de la nube"
                 >
                   <RefreshCw className={`w-3 h-3 text-slate-400 ${isSyncing ? 'animate-spin' : ''}`} />
                 </button>
@@ -290,8 +298,8 @@ const App: React.FC = () => {
             ) : (
               <div className="flex items-center gap-4">
                 <div className="hidden md:flex flex-col items-end">
-                  <span className="text-xs font-bold">{role === 'admin' ? 'Admin' : currentUser?.name}</span>
-                  <span className="text-[9px] text-slate-500 uppercase tracking-tighter">{role}</span>
+                  <span className="text-xs font-bold">{role === 'admin' ? 'Administrador' : currentUser?.name}</span>
+                  <span className="text-[9px] text-slate-500 uppercase tracking-tighter">{role === 'admin' ? 'Control Total' : 'Acceso Trabajador'}</span>
                 </div>
                 <button onClick={() => { if(confirm('¿Cerrar sesión?')) setRole('none'); }} className="p-2 bg-red-500/10 text-red-400 rounded-lg border border-red-500/20 hover:bg-red-500/20 transition-all"><LogOut className="w-4 h-4" /></button>
               </div>

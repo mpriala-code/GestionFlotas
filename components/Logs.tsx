@@ -17,7 +17,8 @@ import {
   FileDown,
   FileUp,
   ArrowRight,
-  Zap
+  Zap,
+  CheckCircle2
 } from 'lucide-react';
 import { LogEntry, Vehicle, Worker, Work, TripType, WorkStatus } from '../types';
 
@@ -37,6 +38,7 @@ interface LogsProps {
 const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, workers, works, isAdmin, currentUser }) => {
   const [showModal, setShowModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   
   // Quick log state
   const [quickVehicleId, setQuickVehicleId] = useState('');
@@ -124,6 +126,7 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
       return;
     }
 
+    setSaveStatus('saving');
     const newLog = {
       ...entry,
       id: Math.random().toString(36).substr(2, 9),
@@ -133,6 +136,11 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
     setVehicles(prev => prev.map(v => 
       v.id === entry.vehicleId ? { ...v, kilometers: entry.endKm || v.kilometers } : v
     ));
+
+    setTimeout(() => {
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    }, 500);
   };
 
   const handleQuickSubmit = (e: React.FormEvent) => {
@@ -165,7 +173,6 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
 
     processEntry(quickLog);
     setQuickEndKm('');
-    alert("¡Registro guardado con éxito!");
   };
 
   const resetForm = () => {
@@ -205,20 +212,6 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
     XLSX.writeFile(wb, `Registros_Flota_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const wb = XLSX.read(evt.target?.result, { type: 'binary' });
-        const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-        if (data.length > 0) alert(`Importando ${data.length} registros.`);
-      } catch (err) { alert("Error al importar."); }
-    };
-    reader.readAsBinaryString(file);
-  };
-
   const activeWorks = works.filter(w => w.status === WorkStatus.ACTIVE);
 
   return (
@@ -227,109 +220,107 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
         <div>
           <h2 className="text-2xl font-bold flex items-center gap-2">
             <History className="w-6 h-6 text-blue-500" />
-            Registros de Actividad
+            Panel de Registros
           </h2>
-          <p className="text-slate-400 text-sm">Historial de trayectos y consumos</p>
+          <p className="text-slate-400 text-sm">Gestiona tus trayectos y consumos diarios</p>
         </div>
         <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto">
+          {saveStatus === 'saved' && (
+             <div className="flex items-center gap-2 px-4 py-2 bg-green-500/10 text-green-500 rounded-xl border border-green-500/20 text-xs font-bold animate-in fade-in zoom-in">
+               <CheckCircle2 className="w-4 h-4" /> Guardado Correctamente
+             </div>
+          )}
           <button onClick={handleExport} className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 font-bold transition-all border border-slate-700 text-xs">
             <FileDown className="w-4 h-4 text-blue-400" /> Exportar
           </button>
-          {isAdmin && (
-            <button onClick={() => fileInputRef.current?.click()} className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 font-bold transition-all border border-slate-700 text-xs">
-              <FileUp className="w-4 h-4 text-green-400" /> Importar
-              <input type="file" ref={fileInputRef} onChange={handleImport} className="hidden" accept=".xlsx, .xls" />
-            </button>
-          )}
           <button 
             onClick={() => setShowModal(true)} 
-            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 px-6 py-2.5 rounded-xl flex items-center justify-center gap-2 font-bold transition-all shadow-lg shadow-blue-600/20 active:scale-95"
+            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 px-6 py-2.5 rounded-xl flex items-center justify-center gap-2 font-bold transition-all shadow-lg shadow-blue-600/20 active:scale-95 text-sm"
           >
             <Plus className="w-5 h-5" />
-            Nuevo Registro
+            Añadir Nuevo Registro
           </button>
         </div>
       </div>
 
-      {/* QUICK LOG WIDGET - ESPECIALLY FOR WORKERS */}
-      <div className="bg-gradient-to-br from-blue-900/20 to-slate-900 border border-blue-500/30 p-6 rounded-3xl shadow-xl">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="p-2 bg-blue-600 rounded-lg"><Zap className="w-4 h-4 text-white" /></div>
-          <h3 className="text-lg font-bold">Registro Rápido de Trayecto</h3>
+      {/* QUICK LOG WIDGET */}
+      <div className="bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 p-6 rounded-3xl shadow-2xl relative overflow-hidden group">
+        <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
+          <Zap className="w-24 h-24 text-blue-500" />
         </div>
-        <form onSubmit={handleQuickSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="p-2.5 bg-blue-600 rounded-xl shadow-lg shadow-blue-500/20"><Zap className="w-4 h-4 text-white" /></div>
+          <div>
+            <h3 className="text-lg font-bold">Registro Rápido</h3>
+            <p className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Añade un trayecto en segundos</p>
+          </div>
+        </div>
+        <form onSubmit={handleQuickSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end relative z-10">
           <div className="space-y-1.5">
-            <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Vehículo</label>
+            <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest px-1">Vehículo Utilizado</label>
             <select 
               value={quickVehicleId} 
               onChange={e => setQuickVehicleId(e.target.value)}
-              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none"
             >
-              <option value="">Vehículo...</option>
+              <option value="">¿Qué vehículo llevas?</option>
               {vehicles.map(v => <option key={v.id} value={v.id}>{v.plate} - {v.model}</option>)}
             </select>
           </div>
           <div className="space-y-1.5">
-            <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Obra</label>
+            <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest px-1">Obra de Destino</label>
             <select 
               value={quickWorkId} 
               onChange={e => setQuickWorkId(e.target.value)}
-              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 transition-all appearance-none"
             >
-              <option value="">Obra...</option>
+              <option value="">¿A qué obra vas?</option>
               {activeWorks.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
             </select>
           </div>
           <div className="space-y-1.5">
-            <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">KM Finales</label>
+            <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest px-1">Kilómetros al Llegar</label>
             <input 
               type="number" 
-              placeholder="Ej: 45200"
+              placeholder="KM finales..."
               value={quickEndKm} 
               onChange={e => setQuickEndKm(e.target.value === '' ? '' : parseInt(e.target.value))}
-              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 transition-all"
             />
           </div>
           <button 
             type="submit"
-            className="bg-blue-600 hover:bg-blue-500 h-[42px] rounded-xl font-bold transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2"
+            disabled={!quickVehicleId || !quickWorkId || quickEndKm === ''}
+            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-30 h-[46px] rounded-xl font-bold transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 text-sm active:scale-95"
           >
-            <Plus className="w-4 h-4" /> Registrar
+            <Plus className="w-4 h-4" /> Registrar Trayecto
           </button>
         </form>
       </div>
 
-      {/* Stats row */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-        <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl flex flex-col items-center">
-          <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-1">Trayectos</p>
-          <p className="text-2xl font-black text-white">{summary.count}</p>
-        </div>
-        <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl flex flex-col items-center">
-          <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-1">Km Totales</p>
-          <p className="text-2xl font-black text-blue-400">{summary.totalKm.toLocaleString()}</p>
-        </div>
-        <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl flex flex-col items-center">
-          <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-1">Gasoil (Est.)</p>
-          <p className="text-2xl font-black text-green-400">{summary.totalFuel.toFixed(1)} L</p>
-        </div>
-      </div>
-
+      {/* Historial Table */}
       <div className="bg-slate-900/50 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+        <div className="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/80">
+          <h3 className="font-bold text-sm text-slate-400 uppercase tracking-widest">Historial Reciente</h3>
+          <div className="flex gap-4 text-[10px] font-bold text-slate-500">
+            <span>{summary.count} VIAJES</span>
+            <span className="text-blue-500">{summary.totalKm.toLocaleString()} KM</span>
+          </div>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-800/50 text-slate-400 border-b border-slate-800">
               <tr>
                 <th className="px-6 py-5 font-bold uppercase text-[10px] tracking-wider">Fecha / Hora</th>
-                <th className="px-6 py-5 font-bold uppercase text-[10px] tracking-wider">Vehículo / Tipo</th>
+                <th className="px-6 py-5 font-bold uppercase text-[10px] tracking-wider">Vehículo</th>
                 <th className="px-6 py-5 font-bold uppercase text-[10px] tracking-wider">Detalles</th>
-                <th className="px-6 py-5 font-bold uppercase text-[10px] tracking-wider">Distancia</th>
+                <th className="px-6 py-5 font-bold uppercase text-[10px] tracking-wider">Kilometraje</th>
                 <th className="px-6 py-5 font-bold uppercase text-[10px] tracking-wider text-right">Consumo</th>
                 {isAdmin && <th className="px-6 py-5 font-bold uppercase text-[10px] tracking-wider text-center"></th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
-              {logs.slice().sort((a,b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`)).map(log => {
+              {logs.slice().sort((a,b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`)).slice(0, 15).map(log => {
                 const v = vehicles.find(v => v.id === log.vehicleId);
                 const w = workers.find(w => w.id === log.workerId);
                 const o = works.find(o => o.id === log.workId);
@@ -340,7 +331,7 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
                       <div className="text-[10px] text-slate-500 flex items-center gap-1"><Clock className="w-2.5 h-2.5" /> {log.time}</div>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="font-bold text-blue-400">{v?.plate || 'S/M'}</div>
+                      <div className="font-bold text-blue-400">{v?.plate || '---'}</div>
                       <div className="text-[9px] text-slate-500 font-bold uppercase">{log.tripType}</div>
                     </td>
                     <td className="px-6 py-4">
@@ -348,12 +339,12 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
                         <User className="w-3.5 h-3.5 text-slate-500" /> {w?.name || '---'}
                       </div>
                       <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
-                        <HardHat className="w-3.5 h-3.5" /> {o?.name || 'Ruta Libre'}
+                        <HardHat className="w-3.5 h-3.5" /> {o?.name || 'Trayecto Libre'}
                       </div>
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2 text-[11px] text-slate-500 font-mono">
-                        {log.startKm} <ArrowRight className="w-3 h-3" /> {log.endKm}
+                        {log.startKm} <ArrowRight className="w-3 h-3 text-blue-500/50" /> {log.endKm}
                       </div>
                       <div className="font-bold text-slate-200 text-sm">{log.distance} km</div>
                     </td>
@@ -371,42 +362,49 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
                   </tr>
                 );
               })}
+              {logs.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-slate-500 italic bg-slate-900/20">
+                    No se han registrado trayectos todavía.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* FLOATING ACTION BUTTON PARA TRABAJADORES */}
+      {/* Floating Action Button (FAB) para acceso directo en móvil */}
       <button 
         onClick={() => setShowModal(true)}
-        className="fixed bottom-8 right-8 w-16 h-16 bg-blue-600 hover:bg-blue-500 text-white rounded-full shadow-2xl shadow-blue-500/40 flex items-center justify-center transition-all hover:scale-110 active:scale-90 z-50 md:hidden border-4 border-slate-950"
-        title="Añadir Registro"
+        className="fixed bottom-8 right-8 w-16 h-16 bg-blue-600 hover:bg-blue-500 text-white rounded-full shadow-2xl shadow-blue-500/40 flex items-center justify-center transition-all hover:scale-110 active:scale-90 z-50 border-4 border-slate-950 group"
+        title="Nuevo Registro"
       >
-        <Plus className="w-8 h-8" />
+        <Plus className="w-8 h-8 group-hover:rotate-90 transition-transform" />
       </button>
 
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/95 backdrop-blur-md overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-800 flex justify-between items-center">
-              <h2 className="text-xl font-bold">Nuevo Registro de Viaje</h2>
+              <h2 className="text-xl font-bold">Detalle de Nuevo Trayecto</h2>
               <button onClick={() => setShowModal(false)} className="text-slate-500 hover:text-white transition-colors text-3xl font-light">&times;</button>
             </div>
             
             <form onSubmit={handleSubmit} className="p-8 space-y-6">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Fecha</label>
+                  <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Fecha del Viaje</label>
                   <input type="date" required value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Hora</label>
+                  <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Hora de Inicio</label>
                   <input type="time" required value={formData.time} onChange={e => setFormData({...formData, time: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Vehículo</label>
+                <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Vehículo Utilizado</label>
                 <select required value={formData.vehicleId} onChange={e => setFormData({...formData, vehicleId: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-blue-500 appearance-none">
                   <option value="">Seleccionar vehículo...</option>
                   {vehicles.map(v => <option key={v.id} value={v.id}>{v.plate} - {v.model}</option>)}
@@ -415,15 +413,15 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Tipo</label>
+                  <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Tipo de Trayecto</label>
                   <select value={formData.tripType} onChange={e => setFormData({...formData, tripType: e.target.value as TripType})} className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 outline-none">
                     {Object.values(TripType).map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Proyecto</label>
+                  <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Obra / Destino</label>
                   <select required value={formData.workId} onChange={e => setFormData({...formData, workId: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 outline-none">
-                    <option value="">Seleccionar obra...</option>
+                    <option value="">¿A qué obra pertenece?</option>
                     {activeWorks.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                   </select>
                 </div>
@@ -432,17 +430,21 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
               <div className="bg-slate-800/40 p-8 rounded-3xl border border-slate-700/50 flex flex-col items-center gap-6">
                 <div className="grid grid-cols-2 gap-8 w-full">
                   <div className="flex flex-col items-center">
-                    <label className="text-[10px] text-blue-400 font-bold uppercase mb-2 tracking-widest">KM INICIO</label>
+                    <label className="text-[10px] text-blue-400 font-bold uppercase mb-2 tracking-widest">KM AL SALIR</label>
                     <input type="number" required value={formData.startKm} onChange={e => setFormData({...formData, startKm: parseInt(e.target.value)})} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-3xl font-black text-center outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div className="flex flex-col items-center">
-                    <label className="text-[10px] text-blue-400 font-bold uppercase mb-2 tracking-widest">KM FINAL</label>
+                    <label className="text-[10px] text-blue-400 font-bold uppercase mb-2 tracking-widest">KM AL LLEGAR</label>
                     <input type="number" required value={formData.endKm} onChange={e => setFormData({...formData, endKm: parseInt(e.target.value)})} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-3xl font-black text-center outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                 </div>
-                <div className="flex gap-8 text-xs font-bold uppercase text-slate-400">
-                  <div className="flex items-center gap-2"><TrendingUp className="w-4 h-4 text-blue-500" /> {formData.distance} km recorridos</div>
-                  <div className="flex items-center gap-2"><Fuel className="w-4 h-4 text-green-500" /> {formData.fuelConsumed} L estimados</div>
+                <div className="flex flex-wrap justify-center gap-6 text-xs font-bold uppercase text-slate-400">
+                  <div className="flex items-center gap-2 bg-slate-900 px-4 py-2 rounded-full border border-slate-700">
+                    <TrendingUp className="w-4 h-4 text-blue-500" /> {formData.distance} km recorridos
+                  </div>
+                  <div className="flex items-center gap-2 bg-slate-900 px-4 py-2 rounded-full border border-slate-700">
+                    <Fuel className="w-4 h-4 text-green-500" /> {formData.fuelConsumed} L consumidos (Est.)
+                  </div>
                 </div>
               </div>
 
