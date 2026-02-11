@@ -1,6 +1,6 @@
 
-import React, { useState, useRef } from 'react';
-import { Plus, Edit2, Trash2, Search, Info, Euro, Calendar, Gauge, FileText, Shield, Wrench, ChevronDown, ChevronUp, FileDown, FileUp } from 'lucide-react';
+import React, { useState, useRef, useMemo } from 'react';
+import { Plus, Edit2, Trash2, Search, Info, Euro, Calendar, Gauge, FileText, Shield, Wrench, ChevronDown, ChevronUp, FileDown, FileUp, CreditCard } from 'lucide-react';
 import { Vehicle, MaintenanceStatus } from '../types';
 
 declare const XLSX: any;
@@ -19,33 +19,12 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState<Partial<Vehicle>>({
-    plate: '',
-    model: '',
-    type: 'Furgoneta',
-    vin: '',
-    year: new Date().getFullYear(),
-    purchaseDate: '',
-    kilometers: 0,
-    baseConsumption: 0,
-    wearFactor: 0,
-    taxDate: '',
-    taxAmount: 0,
-    nextGeneralPayment: '',
-    insuranceCost: 0,
-    insuranceExpiry: '',
-    itvDate: '',
-    lastMaintenance: '',
-    nextMaintenance: '',
-    maintStatus: MaintenanceStatus.UP_TO_DATE,
-    maintNotes: '',
-    loan: {
-      active: false,
-      totalAmount: 0,
-      monthlyFee: 0,
-      startDate: '',
-      endDate: '',
-      remainingAmount: 0
-    }
+    plate: '', model: '', type: 'Furgoneta', vin: '', year: 2024,
+    purchaseDate: '', kilometers: 0, baseConsumption: 0, wearFactor: 0,
+    taxDate: '', taxAmount: 0, nextGeneralPayment: '', insuranceCost: 0,
+    insuranceExpiry: '', itvDate: '', lastMaintenance: '', nextMaintenance: '',
+    maintStatus: MaintenanceStatus.UP_TO_DATE, maintNotes: '',
+    loan: { active: false, totalAmount: 0, monthlyFee: 0, startDate: '', endDate: '', remainingAmount: 0 }
   });
 
   const filteredVehicles = vehicles.filter(v => 
@@ -55,476 +34,194 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isAdmin) return;
-
     if (editingVehicle) {
       setVehicles(prev => prev.map(v => v.id === editingVehicle.id ? { ...v, ...formData as Vehicle } : v));
     } else {
-      const newVehicle = {
-        ...formData as Vehicle,
-        id: Math.random().toString(36).substr(2, 9),
-        maintenanceHistory: []
-      };
-      setVehicles(prev => [...prev, newVehicle]);
+      setVehicles(prev => [...prev, { ...formData as Vehicle, id: Math.random().toString(36).substr(2, 9), maintenanceHistory: [] }]);
     }
     closeModal();
   };
 
-  const openEdit = (v: Vehicle) => {
-    setEditingVehicle(v);
-    setFormData(v);
-    setShowModal(true);
+  const closeModal = () => { setShowModal(false); setEditingVehicle(null); };
+
+  const calculateLoanStats = (v: Vehicle) => {
+    if (!v.loan || !v.loan.active || v.loan.totalAmount <= 0) return null;
+    const paid = v.loan.totalAmount - v.loan.remainingAmount;
+    const progress = Math.min(100, Math.max(0, (paid / v.loan.totalAmount) * 100));
+    
+    // Estimación de cuotas (cotas)
+    const quotasTotal = v.loan.monthlyFee > 0 ? Math.ceil(v.loan.totalAmount / v.loan.monthlyFee) : 0;
+    const quotasPaid = v.loan.monthlyFee > 0 ? Math.floor(paid / v.loan.monthlyFee) : 0;
+    const quotasRemaining = Math.max(0, quotasTotal - quotasPaid);
+
+    return { paid, progress, quotasPaid, quotasTotal, quotasRemaining };
   };
 
-  const closeModal = () => {
-    setShowModal(false);
-    setEditingVehicle(null);
-    setFormData({
-      plate: '',
-      model: '',
-      type: 'Furgoneta',
-      vin: '',
-      year: new Date().getFullYear(),
-      purchaseDate: '',
-      kilometers: 0,
-      baseConsumption: 0,
-      wearFactor: 0,
-      taxDate: '',
-      taxAmount: 0,
-      nextGeneralPayment: '',
-      insuranceCost: 0,
-      insuranceExpiry: '',
-      itvDate: '',
-      lastMaintenance: '',
-      nextMaintenance: '',
-      maintStatus: MaintenanceStatus.UP_TO_DATE,
-      maintNotes: '',
-      loan: { active: false, totalAmount: 0, monthlyFee: 0, startDate: '', endDate: '', remainingAmount: 0 }
-    });
-  };
-
-  const handleDelete = (id: string) => {
-    if (confirm('¿Estás seguro de que quieres eliminar este vehículo?')) {
+  const deleteVehicle = (id: string) => {
+    if (confirm('¿Eliminar este vehículo de la flota permanentemente?')) {
       setVehicles(prev => prev.filter(v => v.id !== id));
     }
   };
 
-  const toggleExpand = (id: string) => {
-    setExpandedId(expandedId === id ? null : id);
-  };
-
-  // EXCEL EXPORT
-  const handleExport = () => {
-    const exportData = vehicles.map(v => ({
-      'Matrícula': v.plate,
-      'Modelo': v.model,
-      'Tipo': v.type,
-      'VIN': v.vin,
-      'Año': v.year,
-      'Kilómetros': v.kilometers,
-      'Consumo Base': v.baseConsumption,
-      'Factor Desgaste': v.wearFactor,
-      'Fecha ITV': v.itvDate,
-      'Vencimiento Seguro': v.insuranceExpiry,
-      'Coste Seguro': v.insuranceCost,
-      'Fecha Impuesto': v.taxDate,
-      'Importe Impuesto': v.taxAmount,
-      'Próximo Pago Gral': v.nextGeneralPayment,
-      'Próximo Manto': v.nextMaintenance,
-      'Estado Manto': v.maintStatus,
-      'Préstamo Activo': v.loan.active ? 'SÍ' : 'NO',
-      'Total Préstamo': v.loan.totalAmount,
-      'Cuota Mensual': v.loan.monthlyFee,
-      'Pendiente Préstamo': v.loan.remainingAmount
-    }));
-
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Vehículos");
-    XLSX.writeFile(wb, `Flota_Vehiculos_${new Date().toISOString().split('T')[0]}.xlsx`);
-  };
-
-  // EXCEL IMPORT
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const data = XLSX.utils.sheet_to_json(ws);
-
-        const newVehicles: Vehicle[] = data.map((row: any) => {
-          // Attempt to find existing by plate to keep ID
-          const existing = vehicles.find(v => v.plate === row['Matrícula']);
-          return {
-            id: existing?.id || Math.random().toString(36).substr(2, 9),
-            plate: row['Matrícula'] || '',
-            model: row['Modelo'] || '',
-            type: row['Tipo'] || 'Furgoneta',
-            vin: row['VIN'] || '',
-            year: parseInt(row['Año']) || new Date().getFullYear(),
-            kilometers: parseInt(row['Kilómetros']) || 0,
-            baseConsumption: parseFloat(row['Consumo Base']) || 0,
-            wearFactor: parseFloat(row['Factor Desgaste']) || 0,
-            purchaseDate: existing?.purchaseDate || '',
-            taxDate: row['Fecha Impuesto'] || '',
-            taxAmount: parseFloat(row['Importe Impuesto']) || 0,
-            nextGeneralPayment: row['Próximo Pago Gral'] || '',
-            insuranceCost: parseFloat(row['Coste Seguro']) || 0,
-            insuranceExpiry: row['Vencimiento Seguro'] || '',
-            itvDate: row['Fecha ITV'] || '',
-            lastMaintenance: existing?.lastMaintenance || '',
-            nextMaintenance: row['Próximo Manto'] || '',
-            maintStatus: (row['Estado Manto'] as MaintenanceStatus) || MaintenanceStatus.UP_TO_DATE,
-            maintNotes: row['Notas Manto'] || existing?.maintNotes || '',
-            maintenanceHistory: existing?.maintenanceHistory || [],
-            loan: {
-              active: row['Préstamo Activo'] === 'SÍ',
-              totalAmount: parseFloat(row['Total Préstamo']) || 0,
-              monthlyFee: parseFloat(row['Cuota Mensual']) || 0,
-              startDate: existing?.loan?.startDate || '',
-              endDate: existing?.loan?.endDate || '',
-              remainingAmount: parseFloat(row['Pendiente Préstamo']) || 0
-            }
-          };
-        });
-
-        if (newVehicles.length > 0) {
-          setVehicles(prev => {
-            const updated = [...prev];
-            newVehicles.forEach(nv => {
-              const idx = updated.findIndex(uv => uv.plate === nv.plate);
-              if (idx !== -1) updated[idx] = nv;
-              else updated.push(nv);
-            });
-            return updated;
-          });
-          alert(`${newVehicles.length} vehículos procesados.`);
-        }
-      } catch (err) {
-        alert("Error al importar el archivo Excel.");
-      }
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    };
-    reader.readAsBinaryString(file);
-  };
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
-        <h2 className="text-2xl font-bold">Gestión de Flota</h2>
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Gestión de Flota</h2>
+          <p className="text-slate-400 text-sm">Control técnico y financiero de los vehículos</p>
+        </div>
         <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto">
           <div className="relative flex-1 sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-            <input 
-              type="text" 
-              placeholder="Buscar por matrícula o modelo..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm"
-            />
+            <input type="text" placeholder="Buscar por matrícula o modelo..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-xs outline-none focus:ring-1 focus:ring-blue-500 transition-all" />
           </div>
-          
-          <button 
-            onClick={handleExport}
-            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl font-bold transition-all border border-slate-700 text-sm"
-          >
-            <FileDown className="w-4 h-4 text-blue-400" />
-            Exportar
-          </button>
-
           {isAdmin && (
-            <>
-              <input type="file" ref={fileInputRef} onChange={handleImport} className="hidden" accept=".xlsx, .xls" />
-              <button 
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl font-bold transition-all border border-slate-700 text-sm"
-              >
-                <FileUp className="w-4 h-4 text-green-400" />
-                Importar
-              </button>
-              <button 
-                onClick={() => setShowModal(true)}
-                className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-xl flex items-center gap-2 font-bold transition-all shadow-lg shadow-blue-600/20"
-              >
-                <Plus className="w-5 h-5" />
-                Añadir
-              </button>
-            </>
+            <button onClick={() => { setFormData({
+              plate: '', model: '', type: 'Furgoneta', vin: '', year: 2024,
+              purchaseDate: '', kilometers: 0, baseConsumption: 0, wearFactor: 0,
+              taxDate: '', taxAmount: 0, nextGeneralPayment: '', insuranceCost: 0,
+              insuranceExpiry: '', itvDate: '', lastMaintenance: '', nextMaintenance: '',
+              maintStatus: MaintenanceStatus.UP_TO_DATE, maintNotes: '',
+              loan: { active: false, totalAmount: 0, monthlyFee: 0, startDate: '', endDate: '', remainingAmount: 0 }
+            }); setShowModal(true); }} className="bg-blue-600 hover:bg-blue-500 px-5 py-2.5 rounded-xl flex items-center gap-2 text-xs font-bold shadow-lg shadow-blue-600/20 transition-all active:scale-95">
+              <Plus className="w-4 h-4" /> Nuevo Vehículo
+            </button>
           )}
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredVehicles.map(v => (
-          <div key={v.id} className="bg-slate-900/50 border border-slate-800 rounded-2xl overflow-hidden group hover:border-slate-600 transition-all shadow-md">
-            <div className="p-6">
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h3 className="text-xl font-bold">{v.plate}</h3>
-                  <p className="text-slate-400 text-sm">{v.model} • {v.type}</p>
-                </div>
-                <div className="flex gap-1">
-                  {isAdmin && (
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => openEdit(v)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-blue-400 transition-colors">
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleDelete(v.id)} className="p-2 bg-slate-800 hover:bg-red-900/40 rounded-lg text-red-400 transition-colors">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+        {filteredVehicles.map(v => {
+          const loanStats = calculateLoanStats(v);
+          return (
+            <div key={v.id} className="bg-slate-900/50 border border-slate-800 rounded-3xl overflow-hidden group hover:border-slate-700 transition-all shadow-md">
+              <div className="p-6">
+                <div className="flex justify-between items-start mb-5">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                       <h3 className="text-xl font-black tracking-tight text-white">{v.plate}</h3>
+                       <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase ${
+                         v.maintStatus === MaintenanceStatus.UP_TO_DATE ? 'bg-green-500/10 text-green-400' : 
+                         v.maintStatus === MaintenanceStatus.PENDING ? 'bg-yellow-500/10 text-yellow-400' : 'bg-red-500/10 text-red-400'
+                       }`}>
+                         {v.maintStatus}
+                       </span>
                     </div>
-                  )}
-                  <button onClick={() => toggleExpand(v.id)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 transition-colors">
-                    {expandedId === v.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                  </button>
+                    <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest">{v.model} • {v.type}</p>
+                  </div>
+                  <div className="flex gap-1.5">
+                    {isAdmin && (
+                      <button onClick={() => { setEditingVehicle(v); setFormData(v); setShowModal(true); }} className="p-2 bg-slate-800/50 hover:bg-blue-900/30 text-slate-500 hover:text-blue-400 rounded-xl transition-all border border-slate-800"><Edit2 className="w-4 h-4" /></button>
+                    )}
+                    <button onClick={() => setExpandedId(expandedId === v.id ? null : v.id)} className="p-2 bg-slate-800/50 hover:bg-slate-700 rounded-xl text-slate-400 border border-slate-800 transition-all"><ChevronDown className={`w-4 h-4 transition-transform duration-300 ${expandedId === v.id ? 'rotate-180' : ''}`} /></button>
+                  </div>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-4 mb-6">
-                <div className="bg-slate-800/40 rounded-xl p-3">
-                  <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Kilómetros</p>
-                  <p className="font-bold flex items-center gap-1.5"><Gauge className="w-3 h-3 text-blue-400" /> {v.kilometers.toLocaleString()} km</p>
+                <div className="grid grid-cols-2 gap-3 mb-6">
+                  <div className="bg-slate-800/40 p-4 rounded-2xl border border-slate-700/30">
+                    <p className="text-[9px] text-slate-500 font-bold uppercase mb-1">Kilometraje</p>
+                    <p className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                      <Gauge className="w-3.5 h-3.5 text-blue-500" /> 
+                      {v.kilometers.toLocaleString()} <span className="text-[10px] font-normal text-slate-500">km</span>
+                    </p>
+                  </div>
+                  <div className="bg-slate-800/40 p-4 rounded-2xl border border-slate-700/30">
+                    <p className="text-[9px] text-slate-500 font-bold uppercase mb-1">Cotas Pagadas</p>
+                    <p className="text-sm font-bold text-yellow-500 flex items-center gap-2">
+                      <CreditCard className="w-3.5 h-3.5" /> 
+                      {loanStats ? `${loanStats.quotasPaid} / ${loanStats.quotasTotal}` : 'N/A'}
+                    </p>
+                  </div>
                 </div>
-                <div className="bg-slate-800/40 rounded-xl p-3">
-                  <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Consumo Base</p>
-                  <p className="font-bold flex items-center gap-1.5 text-slate-200"> {v.baseConsumption} L/100</p>
-                </div>
-              </div>
 
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between items-center text-slate-300">
-                  <span className="flex items-center gap-2"><Calendar className="w-4 h-4 text-slate-500" /> ITV</span>
-                  <span className={`font-medium ${new Date(v.itvDate) < new Date() ? 'text-red-400' : 'text-slate-200'}`}>{v.itvDate}</span>
-                </div>
-                <div className="flex justify-between items-center text-slate-300">
-                  <span className="flex items-center gap-2"><Shield className="w-4 h-4 text-slate-500" /> Seguro</span>
-                  <span className={`font-medium ${new Date(v.insuranceExpiry) < new Date() ? 'text-red-400' : 'text-slate-200'}`}>{v.insuranceExpiry}</span>
-                </div>
-                <div className="flex justify-between items-center text-slate-300">
-                  <span className="flex items-center gap-2"><Wrench className="w-4 h-4 text-slate-500" /> Prox. Mantenimiento</span>
-                  <span className="font-medium text-slate-200">{v.nextMaintenance}</span>
-                </div>
-              </div>
-
-              {expandedId === v.id && (
-                <div className="mt-4 pt-4 border-t border-slate-800 space-y-4 animate-in fade-in slide-in-from-top-2">
-                  <div className="grid grid-cols-2 gap-y-3 text-xs">
-                    <div>
-                      <p className="text-slate-500 uppercase font-bold mb-0.5">Bastidor (VIN)</p>
-                      <p className="text-slate-300 font-mono">{v.vin || 'N/A'}</p>
+                {v.loan?.active && loanStats && (
+                  <div className="space-y-3 bg-slate-950/40 p-5 rounded-2xl border border-slate-800/50 group-hover:border-yellow-500/20 transition-all">
+                    <div className="flex justify-between items-end">
+                      <div>
+                        <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Pendiente Préstamo</p>
+                        <p className="text-lg font-black text-slate-100">{v.loan.remainingAmount.toLocaleString()}€</p>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[10px] font-black bg-yellow-500/10 text-yellow-500 px-2 py-0.5 rounded border border-yellow-500/20">{loanStats.progress.toFixed(0)}%</span>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-slate-500 uppercase font-bold mb-0.5">Año Fab.</p>
-                      <p className="text-slate-300">{v.year}</p>
+                    <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+                      <div className="h-full bg-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.3)] transition-all duration-1000 ease-out" style={{ width: `${loanStats.progress}%` }} />
                     </div>
-                    <div>
-                      <p className="text-slate-500 uppercase font-bold mb-0.5">Último Manto.</p>
-                      <p className="text-slate-300">{v.lastMaintenance || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <p className="text-slate-500 uppercase font-bold mb-0.5">Impuesto Circ.</p>
-                      <p className="text-slate-300">{v.taxAmount}€ ({v.taxDate})</p>
-                    </div>
-                  </div>
-                  {v.maintNotes && (
-                    <div className="bg-slate-800/30 p-3 rounded-lg border border-slate-800">
-                      <p className="text-slate-500 text-[10px] uppercase font-bold mb-1">Notas Manto.</p>
-                      <p className="text-slate-400 text-xs italic line-clamp-2">{v.maintNotes}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {v.loan.active && (
-                <div className="mt-6 pt-4 border-t border-slate-800">
-                  <div className="flex justify-between text-sm mb-2">
-                    <span className="text-slate-400">Préstamo Pendiente</span>
-                    <span className="font-bold text-yellow-500">{v.loan.remainingAmount.toLocaleString()}€</span>
-                  </div>
-                  <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                    <div 
-                      className="bg-yellow-500 h-full transition-all duration-500" 
-                      style={{ width: `${Math.min(100, (1 - v.loan.remainingAmount / v.loan.totalAmount) * 100)}%` }} 
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Modal Form */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-5xl shadow-2xl my-8 max-h-[90vh] flex flex-col">
-            <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-2xl z-10 shrink-0">
-              <h2 className="text-xl font-bold">{editingVehicle ? 'Editar Vehículo' : 'Nuevo Vehículo'}</h2>
-              <button onClick={closeModal} className="text-slate-400 hover:text-white transition-colors">&times;</button>
-            </div>
-            
-            <form onSubmit={handleSubmit} className="p-8 space-y-8 overflow-y-auto flex-1">
-              {/* Basic Info Section */}
-              <section className="space-y-4">
-                <div className="flex items-center gap-2 text-blue-400 mb-4">
-                  <FileText className="w-5 h-5" />
-                  <h3 className="font-bold uppercase text-sm tracking-wider">Información Básica</h3>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">Matrícula</label>
-                    <input required value={formData.plate} onChange={e => setFormData({...formData, plate: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 focus:ring-1 focus:ring-blue-500 outline-none" placeholder="0000-XXX" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">Modelo</label>
-                    <input required value={formData.model} onChange={e => setFormData({...formData, model: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 focus:ring-1 focus:ring-blue-500 outline-none" placeholder="Renault Master..." />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">Tipo</label>
-                    <select value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 outline-none">
-                      <option>Furgoneta</option>
-                      <option>Camión</option>
-                      <option>Turismo</option>
-                      <option>Motocicleta</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">Año Fabricación</label>
-                    <input type="number" value={formData.year} onChange={e => setFormData({...formData, year: parseInt(e.target.value)})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 outline-none" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">Fecha Compra</label>
-                    <input type="date" value={formData.purchaseDate} onChange={e => setFormData({...formData, purchaseDate: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 outline-none" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">Kilómetros actuales</label>
-                    <input type="number" value={formData.kilometers} onChange={e => setFormData({...formData, kilometers: parseInt(e.target.value)})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 outline-none" />
-                  </div>
-                  <div className="space-y-1 md:col-span-2">
-                    <label className="text-xs text-slate-400">VIN / Número de Bastidor</label>
-                    <input value={formData.vin} onChange={e => setFormData({...formData, vin: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 outline-none" placeholder="VF123..." />
-                  </div>
-                </div>
-              </section>
-
-              {/* Taxes and General Section */}
-              <section className="space-y-4">
-                <div className="flex items-center gap-2 text-green-400 mb-4">
-                  <Euro className="w-5 h-5" />
-                  <h3 className="font-bold uppercase text-sm tracking-wider">Impuestos y Pagos</h3>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">Fecha Impuesto Circulación</label>
-                    <input type="date" value={formData.taxDate} onChange={e => setFormData({...formData, taxDate: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 outline-none" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">Importe Impuesto (€)</label>
-                    <input type="number" value={formData.taxAmount} onChange={e => setFormData({...formData, taxAmount: parseFloat(e.target.value)})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 outline-none" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">Próximo Pago General</label>
-                    <input type="date" value={formData.nextGeneralPayment} onChange={e => setFormData({...formData, nextGeneralPayment: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 outline-none" />
-                  </div>
-                </div>
-              </section>
-
-              {/* Insurance and Tech Section */}
-              <section className="space-y-4">
-                <div className="flex items-center gap-2 text-purple-400 mb-4">
-                  <Shield className="w-5 h-5" />
-                  <h3 className="font-bold uppercase text-sm tracking-wider">Seguro y Documentación</h3>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">Coste Anual Seguro (€)</label>
-                    <input type="number" value={formData.insuranceCost} onChange={e => setFormData({...formData, insuranceCost: parseFloat(e.target.value)})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 outline-none" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">Vencimiento Seguro</label>
-                    <input type="date" value={formData.insuranceExpiry} onChange={e => setFormData({...formData, insuranceExpiry: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 outline-none" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">Vencimiento ITV</label>
-                    <input type="date" value={formData.itvDate} onChange={e => setFormData({...formData, itvDate: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 outline-none" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">Consumo (L/100km)</label>
-                    <input type="number" step="0.1" value={formData.baseConsumption} onChange={e => setFormData({...formData, baseConsumption: parseFloat(e.target.value)})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 outline-none" />
-                  </div>
-                </div>
-              </section>
-
-              {/* Maintenance Section */}
-              <section className="space-y-4">
-                <div className="flex items-center gap-2 text-orange-400 mb-4">
-                  <Wrench className="w-5 h-5" />
-                  <h3 className="font-bold uppercase text-sm tracking-wider">Mantenimiento</h3>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">Último Mantenimiento</label>
-                    <input type="date" value={formData.lastMaintenance} onChange={e => setFormData({...formData, lastMaintenance: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 outline-none" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">Próximo Mantenimiento</label>
-                    <input type="date" value={formData.nextMaintenance} onChange={e => setFormData({...formData, nextMaintenance: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 outline-none" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-slate-400">Estado Manto.</label>
-                    <select value={formData.maintStatus} onChange={e => setFormData({...formData, maintStatus: e.target.value as MaintenanceStatus})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 outline-none">
-                      <option value={MaintenanceStatus.UP_TO_DATE}>Al día</option>
-                      <option value={MaintenanceStatus.PENDING}>Pendiente</option>
-                      <option value={MaintenanceStatus.DELAYED}>Atrasado</option>
-                    </select>
-                  </div>
-                  <div className="md:col-span-3 space-y-1">
-                    <label className="text-xs text-slate-400">Notas de Mantenimiento Detalladas</label>
-                    <textarea value={formData.maintNotes} onChange={e => setFormData({...formData, maintNotes: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 h-24 resize-none outline-none focus:ring-1 focus:ring-blue-500" placeholder="Historial de reparaciones, cambios de filtros..." />
-                  </div>
-                </div>
-              </section>
-
-              {/* Loan Section */}
-              <section className="bg-slate-800/30 p-6 rounded-2xl border border-slate-800 space-y-4">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-yellow-400 font-bold text-sm uppercase tracking-wider">Financiación / Préstamo</h3>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400">Activo</span>
-                    <input 
-                      type="checkbox" 
-                      className="w-4 h-4 rounded border-slate-700 bg-slate-800 text-blue-500 focus:ring-blue-500"
-                      checked={formData.loan?.active} 
-                      onChange={e => setFormData({...formData, loan: {...formData.loan!, active: e.target.checked}})} 
-                    />
-                  </div>
-                </div>
-                {formData.loan?.active && (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 animate-in fade-in slide-in-from-top-2">
-                    <div className="space-y-1">
-                      <label className="text-xs text-slate-400">Total Financiado (€)</label>
-                      <input type="number" value={formData.loan?.totalAmount} onChange={e => setFormData({...formData, loan: {...formData.loan!, totalAmount: parseFloat(e.target.value)}})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 outline-none" />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs text-slate-400">Cuota Mensual (€)</label>
-                      <input type="number" value={formData.loan?.monthlyFee} onChange={e => setFormData({...formData, loan: {...formData.loan!, monthlyFee: parseFloat(e.target.value)}})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 outline-none" />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs text-slate-400">Monto Restante (€)</label>
-                      <input type="number" value={formData.loan?.remainingAmount} onChange={e => setFormData({...formData, loan: {...formData.loan!, remainingAmount: parseFloat(e.target.value)}})} className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 outline-none" />
+                    <div className="flex justify-between text-[10px] font-bold text-slate-500">
+                      <span className="flex items-center gap-1"><Euro className="w-2.5 h-2.5" /> {v.loan.monthlyFee}€ / mes</span>
+                      <span className="text-slate-400">Restan {loanStats.quotasRemaining} cotas</span>
                     </div>
                   </div>
                 )}
-              </section>
+
+                {expandedId === v.id && (
+                  <div className="mt-6 pt-6 border-t border-slate-800 space-y-5 animate-in slide-in-from-top-4 duration-300">
+                    <div className="grid grid-cols-2 gap-4 text-[11px]">
+                      <div className="space-y-0.5"><p className="text-slate-500 font-bold uppercase tracking-tighter">Vencimiento ITV</p><p className="font-bold text-slate-200">{v.itvDate || 'No asignada'}</p></div>
+                      <div className="space-y-0.5"><p className="text-slate-500 font-bold uppercase tracking-tighter">Vencimiento Seguro</p><p className="font-bold text-slate-200">{v.insuranceExpiry || 'No asignada'}</p></div>
+                      <div className="space-y-0.5"><p className="text-slate-500 font-bold uppercase tracking-tighter">Impuesto Circulación</p><p className="font-bold text-slate-200">{v.taxDate} ({v.taxAmount}€)</p></div>
+                      <div className="space-y-0.5"><p className="text-slate-500 font-bold uppercase tracking-tighter">Consumo Base</p><p className="font-bold text-slate-200">{v.baseConsumption} L / 100km</p></div>
+                    </div>
+                    {isAdmin && (
+                      <div className="pt-4 flex justify-end border-t border-slate-800">
+                        <button onClick={() => deleteVehicle(v.id)} className="flex items-center gap-2 text-red-500 hover:text-red-400 text-[10px] font-bold uppercase transition-colors">
+                          <Trash2 className="w-3 h-3" /> Eliminar Vehículo
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-4xl shadow-2xl p-8 my-auto">
+            <div className="flex justify-between items-center mb-8 border-b border-slate-800 pb-5">
+              <div>
+                <h2 className="text-2xl font-black text-white">{editingVehicle ? 'Editar Vehículo' : 'Nueva Alta de Vehículo'}</h2>
+                <p className="text-slate-500 text-xs">Completa la ficha técnica y financiera</p>
+              </div>
+              <button onClick={closeModal} className="text-3xl text-slate-500 hover:text-white transition-colors">&times;</button>
+            </div>
+            <form onSubmit={handleSubmit} className="space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="space-y-1.5"><label className="text-[10px] font-black text-slate-500 uppercase">Matrícula</label><input required value={formData.plate} onChange={e => setFormData({...formData, plate: e.target.value.toUpperCase()})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:ring-1 focus:ring-blue-500 outline-none" placeholder="1234ABC" /></div>
+                <div className="space-y-1.5"><label className="text-[10px] font-black text-slate-500 uppercase">Modelo</label><input required value={formData.model} onChange={e => setFormData({...formData, model: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:ring-1 focus:ring-blue-500 outline-none" placeholder="Renault Master" /></div>
+                <div className="space-y-1.5"><label className="text-[10px] font-black text-slate-500 uppercase">Kilómetros Iniciales</label><input type="number" required value={formData.kilometers} onChange={e => setFormData({...formData, kilometers: parseInt(e.target.value)})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:ring-1 focus:ring-blue-500 outline-none" /></div>
+              </div>
               
-              <div className="pt-6 border-t border-slate-800 flex justify-end gap-4 shrink-0">
-                <button type="button" onClick={closeModal} className="bg-slate-800 hover:bg-slate-700 px-8 py-3 rounded-xl transition-colors font-medium">Cancelar</button>
-                <button type="submit" className="bg-blue-600 hover:bg-blue-500 px-10 py-3 rounded-xl font-bold transition-all shadow-lg shadow-blue-600/20">Guardar Cambios</button>
+              <div className="bg-slate-800/30 p-7 rounded-3xl border border-slate-700 space-y-6">
+                <div className="flex justify-between items-center">
+                   <h3 className="text-xs font-black text-yellow-500 uppercase tracking-widest flex items-center gap-2"><CreditCard className="w-4 h-4" /> Financiación y Cotas</h3>
+                   <label className="flex items-center gap-3 cursor-pointer">
+                     <span className="text-[10px] font-bold text-slate-500 uppercase">Activar Préstamo</span>
+                     <input type="checkbox" className="w-5 h-5 accent-blue-600 rounded-md" checked={formData.loan?.active} onChange={e => setFormData({...formData, loan: {...formData.loan!, active: e.target.checked}})} />
+                   </label>
+                </div>
+                {formData.loan?.active && (
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-5 animate-in fade-in slide-in-from-top-2">
+                    <div className="space-y-1.5"><label className="text-[10px] font-black text-slate-500 uppercase">Importe Total Financiado</label><input type="number" value={formData.loan?.totalAmount} onChange={e => setFormData({...formData, loan: {...formData.loan!, totalAmount: parseFloat(e.target.value)}})} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:ring-1 focus:ring-yellow-500/50 outline-none" /></div>
+                    <div className="space-y-1.5"><label className="text-[10px] font-black text-slate-500 uppercase">Cota Mensual (€)</label><input type="number" value={formData.loan?.monthlyFee} onChange={e => setFormData({...formData, loan: {...formData.loan!, monthlyFee: parseFloat(e.target.value)}})} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:ring-1 focus:ring-yellow-500/50 outline-none" /></div>
+                    <div className="space-y-1.5"><label className="text-[10px] font-black text-slate-500 uppercase">Importe Pendiente Hoy</label><input type="number" value={formData.loan?.remainingAmount} onChange={e => setFormData({...formData, loan: {...formData.loan!, remainingAmount: parseFloat(e.target.value)}})} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:ring-1 focus:ring-yellow-500/50 outline-none" /></div>
+                    <div className="space-y-1.5"><label className="text-[10px] font-black text-slate-500 uppercase">Fecha Finalización</label><input type="date" value={formData.loan?.endDate} onChange={e => setFormData({...formData, loan: {...formData.loan!, endDate: e.target.value}})} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm outline-none" /></div>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="space-y-1.5"><label className="text-[10px] font-black text-slate-500 uppercase">ITV (Próxima)</label><input type="date" value={formData.itvDate} onChange={e => setFormData({...formData, itvDate: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm" /></div>
+                <div className="space-y-1.5"><label className="text-[10px] font-black text-slate-500 uppercase">Seguro (Vencimiento)</label><input type="date" value={formData.insuranceExpiry} onChange={e => setFormData({...formData, insuranceExpiry: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm" /></div>
+                <div className="space-y-1.5"><label className="text-[10px] font-black text-slate-500 uppercase">Impuesto (Monto €)</label><input type="number" value={formData.taxAmount} onChange={e => setFormData({...formData, taxAmount: parseFloat(e.target.value)})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm" /></div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-6 border-t border-slate-800">
+                <button type="button" onClick={closeModal} className="px-7 py-3 rounded-xl bg-slate-800 font-black text-[10px] uppercase tracking-widest transition-all hover:bg-slate-700">Cancelar</button>
+                <button type="submit" className="px-10 py-3 rounded-xl bg-blue-600 font-black text-[10px] uppercase tracking-widest transition-all hover:bg-blue-500 shadow-xl shadow-blue-600/20 active:scale-95">Guardar Cambios</button>
               </div>
             </form>
           </div>
