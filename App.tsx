@@ -21,7 +21,8 @@ import {
   CloudOff,
   RefreshCw,
   Wifi,
-  WifiOff
+  WifiOff,
+  Lock
 } from 'lucide-react';
 import { 
   Vehicle, Worker, Work, LogEntry, TabType, 
@@ -71,7 +72,6 @@ const App: React.FC = () => {
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   const [isOnline, setIsOnline] = useState(true);
 
-  const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginType, setLoginType] = useState<AuthRole>('worker');
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -133,7 +133,6 @@ const App: React.FC = () => {
       const timestamp = Date.now();
       const payload = { ...data, lastUpdated: timestamp };
       
-      // npoint.io recomienda PUT para actualizar bins existentes
       const response = await fetch(`https://api.npoint.io/${currentSyncId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -156,19 +155,19 @@ const App: React.FC = () => {
 
   // Sync initialization
   useEffect(() => {
-    if (syncId) {
+    if (syncId && role !== 'none') {
       pullFromCloud(syncId);
     }
-  }, [syncId, pullFromCloud]);
+  }, [syncId, pullFromCloud, role]);
 
-  // AUTO-POLLING: Cada 8 segundos para mayor reactividad
+  // AUTO-POLLING
   useEffect(() => {
-    if (!syncId) return;
+    if (!syncId || role === 'none') return;
     const interval = setInterval(() => {
       pullFromCloud(syncId, true);
     }, 8000);
     return () => clearInterval(interval);
-  }, [syncId, pullFromCloud]);
+  }, [syncId, pullFromCloud, role]);
 
   // Auto-save locales
   useEffect(() => {
@@ -182,7 +181,7 @@ const App: React.FC = () => {
     localStorage.setItem('fleet_sync_id', JSON.stringify(syncId));
   }, [vehicles, workers, works, logs, priceHistory, role, currentUser, syncId]);
 
-  // AUTO-PUSH: Sincroniza cambios automáticamente (debounce de 1.5s)
+  // AUTO-PUSH
   useEffect(() => {
     if (syncId && (isAdmin || isWorker)) {
       const timeout = setTimeout(() => {
@@ -223,14 +222,14 @@ const App: React.FC = () => {
     e.preventDefault();
     if (loginType === 'admin') {
       if (loginUsername === 'admin' && loginPassword === 'admin123') {
-        setRole('admin'); setCurrentUser(null); setShowLoginModal(false);
-      } else alert('Error en admin');
+        setRole('admin'); setCurrentUser(null);
+      } else alert('Error en las credenciales de administrador');
     } else {
       const found = workers.find(w => w.username === loginUsername && w.password === loginPassword);
       if (found) {
-        setRole('worker'); setCurrentUser(found); setShowLoginModal(false);
-        setActiveTab('logs'); // Directo a registros
-      } else alert('Error en trabajador');
+        setRole('worker'); setCurrentUser(found);
+        setActiveTab('logs');
+      } else alert('Error en las credenciales de trabajador');
     }
     setLoginUsername(''); setLoginPassword('');
   };
@@ -247,9 +246,84 @@ const App: React.FC = () => {
       { id: 'settings', label: 'Ajustes', icon: SettingsIcon },
     ];
     if (role === 'worker') return items.filter(i => i.id === 'logs');
-    if (role === 'none') return items.filter(i => i.id === 'dashboard');
+    if (role === 'none') return [];
     return items;
   }, [role]);
+
+  // Si no hay sesión iniciada, mostrar solo la pantalla de login
+  if (role === 'none') {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 text-slate-50 p-6">
+        <div className="w-full max-w-md animate-in zoom-in-95 duration-500">
+          <div className="flex flex-col items-center mb-10">
+            <div className="bg-blue-600 p-4 rounded-2xl shadow-2xl shadow-blue-600/20 mb-4 animate-bounce">
+              <Truck className="w-10 h-10 text-white" />
+            </div>
+            <h1 className="text-4xl font-black bg-gradient-to-r from-white to-slate-500 bg-clip-text text-transparent">FleetMaster AI</h1>
+            <p className="text-slate-500 text-sm font-bold uppercase tracking-[0.2em] mt-2">Sistema de Gestión de Flotas</p>
+          </div>
+
+          <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent" />
+            
+            <h2 className="text-2xl font-bold mb-8 text-center flex items-center justify-center gap-3">
+              <Lock className="w-5 h-5 text-blue-500" /> Acceso al Sistema
+            </h2>
+
+            <div className="flex bg-slate-800 p-1.5 rounded-2xl mb-8">
+              <button 
+                onClick={() => setLoginType('worker')} 
+                className={`flex-1 py-3 rounded-xl text-sm font-black uppercase tracking-wider transition-all ${loginType === 'worker' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                Trabajador
+              </button>
+              <button 
+                onClick={() => setLoginType('admin')} 
+                className={`flex-1 py-3 rounded-xl text-sm font-black uppercase tracking-wider transition-all ${loginType === 'admin' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                Admin
+              </button>
+            </div>
+
+            <form onSubmit={handleLogin} className="space-y-5">
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest px-1">Usuario</label>
+                <input 
+                  required 
+                  value={loginUsername} 
+                  onChange={e => setLoginUsername(e.target.value)} 
+                  className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-5 py-4 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none transition-all" 
+                  placeholder="Introduce tu usuario..." 
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest px-1">Contraseña</label>
+                <input 
+                  required 
+                  type="password" 
+                  value={loginPassword} 
+                  onChange={e => setLoginPassword(e.target.value)} 
+                  className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-5 py-4 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none transition-all" 
+                  placeholder="Introduce tu contraseña..." 
+                />
+              </div>
+              
+              <button 
+                type="submit" 
+                className="w-full bg-blue-600 py-5 rounded-2xl font-black uppercase tracking-widest text-sm shadow-xl shadow-blue-600/30 hover:bg-blue-500 transition-all active:scale-[0.98] mt-4"
+              >
+                Iniciar Sesión
+              </button>
+            </form>
+          </div>
+          
+          <p className="mt-8 text-center text-xs text-slate-600 font-medium">
+            &copy; 2025 FleetMaster AI. Todos los derechos reservados.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-50">
@@ -293,17 +367,13 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {role === 'none' ? (
-              <button onClick={() => setShowLoginModal(true)} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-sm font-bold shadow-lg shadow-blue-600/20 transition-all active:scale-95">Acceder</button>
-            ) : (
-              <div className="flex items-center gap-4">
-                <div className="hidden md:flex flex-col items-end">
-                  <span className="text-xs font-bold">{role === 'admin' ? 'Administrador' : currentUser?.name}</span>
-                  <span className="text-[9px] text-slate-500 uppercase tracking-tighter">{role === 'admin' ? 'Control Total' : 'Acceso Trabajador'}</span>
-                </div>
-                <button onClick={() => { if(confirm('¿Cerrar sesión?')) setRole('none'); }} className="p-2 bg-red-500/10 text-red-400 rounded-lg border border-red-500/20 hover:bg-red-500/20 transition-all"><LogOut className="w-4 h-4" /></button>
+            <div className="flex items-center gap-4">
+              <div className="hidden md:flex flex-col items-end">
+                <span className="text-xs font-bold">{role === 'admin' ? 'Administrador' : currentUser?.name}</span>
+                <span className="text-[9px] text-slate-500 uppercase tracking-tighter">{role === 'admin' ? 'Control Total' : 'Acceso Trabajador'}</span>
               </div>
-            )}
+              <button onClick={() => { if(confirm('¿Cerrar sesión?')) setRole('none'); }} className="p-2 bg-red-500/10 text-red-400 rounded-lg border border-red-500/20 hover:bg-red-500/20 transition-all"><LogOut className="w-4 h-4" /></button>
+            </div>
           </div>
         </div>
         <div className="max-w-7xl mx-auto px-4 border-t border-slate-800 flex overflow-x-auto no-scrollbar scroll-smooth">
@@ -341,26 +411,6 @@ const App: React.FC = () => {
           fullState={{vehicles, workers, works, logs, priceHistory}} 
         />}
       </main>
-
-      {showLoginModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-md w-full animate-in zoom-in-95 duration-200">
-            <h2 className="text-2xl font-bold mb-6 text-center">Identificación</h2>
-            <div className="flex bg-slate-800 p-1 rounded-2xl mb-6">
-              <button onClick={() => setLoginType('worker')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all ${loginType === 'worker' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400'}`}>Trabajador</button>
-              <button onClick={() => setLoginType('admin')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all ${loginType === 'admin' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400'}`}>Admin</button>
-            </div>
-            <form onSubmit={handleLogin} className="space-y-4">
-              <input required value={loginUsername} onChange={e => setLoginUsername(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3.5 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Usuario" />
-              <input required type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3.5 text-white placeholder-slate-500 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Contraseña" />
-              <div className="flex gap-3 pt-4">
-                <button type="button" onClick={() => setShowLoginModal(false)} className="flex-1 bg-slate-800 py-4 rounded-2xl font-bold hover:bg-slate-700 transition-all">Cerrar</button>
-                <button type="submit" className="flex-1 bg-blue-600 py-4 rounded-2xl font-bold shadow-lg shadow-blue-600/30 hover:bg-blue-500 transition-all">Entrar</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

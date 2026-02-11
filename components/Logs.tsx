@@ -108,6 +108,18 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
     }
   }, [formData.startKm, formData.endKm, formData.vehicleId, vehicles]);
 
+  // Si el tipo de trayecto es de tipo Pavellón/Casa, limpiamos la obra
+  const isFixedTripType = formData.tripType === TripType.HOME_TO_PAVILION || formData.tripType === TripType.PAVILION_TO_HOME;
+
+  const handleTripTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value as TripType;
+    setFormData(prev => ({
+      ...prev,
+      tripType: val,
+      workId: (val === TripType.HOME_TO_PAVILION || val === TripType.PAVILION_TO_HOME) ? '' : prev.workId
+    }));
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     processEntry(formData as LogEntry);
@@ -339,7 +351,7 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
                         <User className="w-3.5 h-3.5 text-slate-500" /> {w?.name || '---'}
                       </div>
                       <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
-                        <HardHat className="w-3.5 h-3.5" /> {o?.name || 'Trayecto Libre'}
+                        <HardHat className="w-3.5 h-3.5" /> {o?.name || 'Ruta General'}
                       </div>
                     </td>
                     <td className="px-6 py-4">
@@ -414,15 +426,31 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Tipo de Trayecto</label>
-                  <select value={formData.tripType} onChange={e => setFormData({...formData, tripType: e.target.value as TripType})} className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 outline-none">
+                  <select 
+                    value={formData.tripType} 
+                    onChange={handleTripTypeChange} 
+                    className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 outline-none"
+                  >
                     {Object.values(TripType).map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Obra / Destino</label>
-                  <select required value={formData.workId} onChange={e => setFormData({...formData, workId: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 outline-none">
-                    <option value="">¿A qué obra pertenece?</option>
-                    {activeWorks.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                  <select 
+                    required={!isFixedTripType}
+                    disabled={isFixedTripType}
+                    value={formData.workId} 
+                    onChange={e => setFormData({...formData, workId: e.target.value})} 
+                    className={`w-full border border-slate-700 rounded-2xl px-4 py-3 outline-none transition-all ${isFixedTripType ? 'bg-slate-900/50 opacity-50 cursor-not-allowed' : 'bg-slate-800 focus:ring-2 focus:ring-blue-500'}`}
+                  >
+                    {isFixedTripType ? (
+                      <option value="">No aplica (Destino implícito)</option>
+                    ) : (
+                      <>
+                        <option value="">¿A qué obra pertenece?</option>
+                        {activeWorks.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                      </>
+                    )}
                   </select>
                 </div>
               </div>

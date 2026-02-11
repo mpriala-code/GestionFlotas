@@ -21,10 +21,10 @@ export type AuthRole = 'none' | 'worker' | 'admin';
 
 export interface PriceRecord {
   id: string;
-  date: string; // Effective starting date
-  endDate?: string; // Optional ending date for the interval
-  fuelPrice: number; // EUR per Liter
-  costPerKm: number; // Extra operational cost per KM
+  date: string; // Fecha de inicio de vigencia
+  endDate?: string; // Fecha de fin de vigencia (opcional)
+  fuelPrice: number; // EUR por Litro
+  costPerKm: number; // Coste operativo extra por KM
 }
 
 export interface MaintenanceRecord {
@@ -49,7 +49,7 @@ export interface LoanInfo {
   startDate: string;
   endDate: string;
   remainingAmount: number;
-  installments?: Installment[]; // List of monthly quotas
+  installments?: Installment[]; // Listado de cuotas mensuales
 }
 
 export interface Vehicle {
@@ -62,7 +62,7 @@ export interface Vehicle {
   purchaseDate: string;
   kilometers: number;
   baseConsumption: number; // L/100km
-  wearFactor: number; // percentage
+  wearFactor: number; // porcentaje
   taxDate: string;
   taxAmount: number;
   nextGeneralPayment: string;
@@ -104,7 +104,7 @@ export interface LogEntry {
   endKm: number;
   distance: number;
   fuelConsumed: number;
-  avgConsumption: number; // L/100km calculated for this trip
+  avgConsumption: number; // L/100km calculado para este viaje
   notes: string;
 }
 
