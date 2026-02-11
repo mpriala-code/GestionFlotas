@@ -42,40 +42,80 @@ export interface Alert {
   type: 'warning' | 'danger';
 }
 
+// Helper to load from localStorage
+const getStorageItem = <T,>(key: string, defaultValue: T): T => {
+  const saved = localStorage.getItem(key);
+  if (!saved) return defaultValue;
+  try {
+    return JSON.parse(saved);
+  } catch (e) {
+    console.error(`Error parsing localStorage key "${key}":`, e);
+    return defaultValue;
+  }
+};
+
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   
-  // Auth states
-  const [role, setRole] = useState<AuthRole>('none');
-  const [currentUser, setCurrentUser] = useState<Worker | null>(null);
+  // Auth states (Persisted)
+  const [role, setRole] = useState<AuthRole>(() => getStorageItem('fleet_role', 'none'));
+  const [currentUser, setCurrentUser] = useState<Worker | null>(() => getStorageItem('fleet_current_user', null));
   
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [loginType, setLoginType] = useState<AuthRole>('worker');
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   
-  // App Config (Price History)
-  const [priceHistory, setPriceHistory] = useState<PriceRecord[]>([
-    { id: 'p_now', date: new Date().toISOString().split('T')[0], fuelPrice: 1.70, costPerKm: 0.15 },
-    { id: 'p1', date: '2024-01-01', fuelPrice: 1.55, costPerKm: 0.12 }
-  ]);
+  // App Config (Persisted)
+  const [priceHistory, setPriceHistory] = useState<PriceRecord[]>(() => 
+    getStorageItem('fleet_price_history', [
+      { id: 'p_now', date: new Date().toISOString().split('T')[0], fuelPrice: 1.70, costPerKm: 0.15 },
+      { id: 'p1', date: '2024-01-01', fuelPrice: 1.55, costPerKm: 0.12 }
+    ])
+  );
   
-  // App Data
-  const [vehicles, setVehicles] = useState<Vehicle[]>(INITIAL_VEHICLES);
-  const [workers, setWorkers] = useState<Worker[]>(INITIAL_WORKERS);
-  const [works, setWorks] = useState<Work[]>(INITIAL_WORKS);
-  const [logs, setLogs] = useState<LogEntry[]>(INITIAL_LOGS);
+  // App Data (Persisted)
+  const [vehicles, setVehicles] = useState<Vehicle[]>(() => getStorageItem('fleet_vehicles', INITIAL_VEHICLES));
+  const [workers, setWorkers] = useState<Worker[]>(() => getStorageItem('fleet_workers', INITIAL_WORKERS));
+  const [works, setWorks] = useState<Work[]>(() => getStorageItem('fleet_works', INITIAL_WORKS));
+  const [logs, setLogs] = useState<LogEntry[]>(() => getStorageItem('fleet_logs', INITIAL_LOGS));
 
   const isAdmin = role === 'admin';
+
+  // Persistence Effects
+  useEffect(() => {
+    localStorage.setItem('fleet_vehicles', JSON.stringify(vehicles));
+  }, [vehicles]);
+
+  useEffect(() => {
+    localStorage.setItem('fleet_workers', JSON.stringify(workers));
+  }, [workers]);
+
+  useEffect(() => {
+    localStorage.setItem('fleet_works', JSON.stringify(works));
+  }, [works]);
+
+  useEffect(() => {
+    localStorage.setItem('fleet_logs', JSON.stringify(logs));
+  }, [logs]);
+
+  useEffect(() => {
+    localStorage.setItem('fleet_price_history', JSON.stringify(priceHistory));
+  }, [priceHistory]);
+
+  useEffect(() => {
+    localStorage.setItem('fleet_role', JSON.stringify(role));
+    localStorage.setItem('fleet_current_user', JSON.stringify(currentUser));
+  }, [role, currentUser]);
 
   // Restrict tab access based on role
   useEffect(() => {
     if (role === 'worker') {
-      setActiveTab('logs');
+      if (activeTab !== 'logs') setActiveTab('logs');
     } else if (role === 'none' && activeTab !== 'dashboard') {
       setActiveTab('dashboard');
     }
-  }, [role]);
+  }, [role, activeTab]);
 
   // Enhanced Alerts logic
   const alerts = useMemo((): Alert[] => {
@@ -145,9 +185,11 @@ const App: React.FC = () => {
   };
 
   const handleLogout = () => {
-    setRole('none');
-    setCurrentUser(null);
-    setActiveTab('dashboard');
+    if (confirm('¿Cerrar sesión?')) {
+      setRole('none');
+      setCurrentUser(null);
+      setActiveTab('dashboard');
+    }
   };
 
   // Define navigation items based on role
@@ -164,16 +206,13 @@ const App: React.FC = () => {
     ];
 
     if (role === 'worker') {
-      // Worker only sees 'Registros'
       return allItems.filter(item => item.id === 'logs');
     }
 
     if (role === 'none') {
-      // Unauthenticated only sees 'Dashboard'
       return allItems.filter(item => item.id === 'dashboard');
     }
 
-    // Admin sees all
     return allItems;
   }, [role]);
 
@@ -251,6 +290,7 @@ const App: React.FC = () => {
                 </div>
                 <button 
                   onClick={handleLogout}
+                  title="Cerrar Sesión"
                   className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors border border-red-500/20"
                 >
                   <LogOut className="w-5 h-5" />
@@ -291,7 +331,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="py-6 border-t border-slate-800 text-center text-slate-500 text-sm">
-        &copy; 2024 FleetMaster AI - Gestión Integral de Flotas
+        &copy; {new Date().getFullYear()} FleetMaster AI - Gestión Integral de Flotas - Datos persistidos localmente
       </footer>
 
       {showLoginModal && (
@@ -358,7 +398,7 @@ const App: React.FC = () => {
             </form>
             <p className="mt-6 text-[10px] text-center text-slate-500 italic">
               * Administrador: <b>admin / admin123</b><br/>
-              * Trabajadores: <b>antonio / 123</b>
+              * Trabajadores por defecto: <b>antonio / 123</b>
             </p>
           </div>
         </div>
