@@ -61,7 +61,7 @@ const getStorageItem = <T,>(key: string, defaultValue: T): T => {
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   
-  // Persisted local state
+  // Persistencia local
   const [role, setRole] = useState<AuthRole>(() => getStorageItem('fleet_role', 'none'));
   const [currentUser, setCurrentUser] = useState<Worker | null>(() => getStorageItem('fleet_current_user', null));
   const [syncId, setSyncId] = useState<string>(() => getStorageItem('fleet_sync_id', ''));
@@ -86,22 +86,22 @@ const App: React.FC = () => {
 
   const isAdmin = role === 'admin';
 
-  // --- CLOUD SYNC LOGIC ---
+  // --- LOGICA DE NUBE (npoint.io) ---
 
   const pushToCloud = useCallback(async (currentSyncId: string, data: any) => {
     if (!currentSyncId) return;
     setIsSyncing(true);
     try {
-      // Usamos npoint.io como base de datos JSON rápida y sin registro para este ejemplo
-      // En producción se usaría Supabase o Firebase
-      await fetch(`https://api.npoint.io/${currentSyncId}`, {
-        method: 'POST',
+      const response = await fetch(`https://api.npoint.io/${currentSyncId}`, {
+        method: 'POST', // POST en npoint actualiza si el bin ya existe
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       });
-      setLastSyncTime(new Date());
+      if (response.ok) {
+        setLastSyncTime(new Date());
+      }
     } catch (e) {
-      console.error("Error sincronizando con la nube:", e);
+      console.error("Error al sincronizar datos:", e);
     } finally {
       setIsSyncing(false);
     }
@@ -122,20 +122,20 @@ const App: React.FC = () => {
         setLastSyncTime(new Date());
       }
     } catch (e) {
-      console.error("Error descargando de la nube:", e);
+      console.error("Error al descargar datos:", e);
     } finally {
       setIsSyncing(false);
     }
   }, []);
 
-  // Sync initialization
+  // Sincronización inicial al conectar
   useEffect(() => {
     if (syncId) {
       pullFromCloud(syncId);
     }
-  }, [syncId, pullFromCloud]);
+  }, [syncId]);
 
-  // Auto-save & Auto-push
+  // Guardado local instantáneo
   useEffect(() => { localStorage.setItem('fleet_vehicles', JSON.stringify(vehicles)); }, [vehicles]);
   useEffect(() => { localStorage.setItem('fleet_workers', JSON.stringify(workers)); }, [workers]);
   useEffect(() => { localStorage.setItem('fleet_works', JSON.stringify(works)); }, [works]);
@@ -147,36 +147,15 @@ const App: React.FC = () => {
     localStorage.setItem('fleet_sync_id', JSON.stringify(syncId));
   }, [role, currentUser, syncId]);
 
-  // Effect to push changes when data changes (debounce could be added for performance)
+  // Subida automática a la nube (solo Admin, cada 5 segundos si hay cambios)
   useEffect(() => {
     if (syncId && isAdmin) {
       const timeout = setTimeout(() => {
         pushToCloud(syncId, { vehicles, workers, works, logs, priceHistory });
-      }, 2000);
+      }, 5000);
       return () => clearTimeout(timeout);
     }
   }, [vehicles, workers, works, logs, priceHistory, syncId, isAdmin, pushToCloud]);
-
-  // URL Hash sharing (One-time import)
-  useEffect(() => {
-    const hash = window.location.hash.substring(1);
-    if (hash && hash.length > 10) {
-      try {
-        const decompressed = LZString.decompressFromEncodedURIComponent(hash);
-        if (decompressed) {
-          const remoteData = JSON.parse(decompressed);
-          if (confirm('Se ha compartido una configuración contigo. ¿Deseas importarla?')) {
-            if (remoteData.vehicles) setVehicles(remoteData.vehicles);
-            if (remoteData.workers) setWorkers(remoteData.workers);
-            if (remoteData.works) setWorks(remoteData.works);
-            if (remoteData.logs) setLogs(remoteData.logs);
-            if (remoteData.priceHistory) setPriceHistory(remoteData.priceHistory);
-            window.location.hash = '';
-          }
-        }
-      } catch (e) {}
-    }
-  }, []);
 
   const alerts = useMemo((): Alert[] => {
     const today = new Date();
@@ -210,12 +189,12 @@ const App: React.FC = () => {
     if (loginType === 'admin') {
       if (loginUsername === 'admin' && loginPassword === 'admin123') {
         setRole('admin'); setCurrentUser(null); setShowLoginModal(false);
-      } else alert('Error en admin');
+      } else alert('Error: Credenciales de administrador incorrectas.');
     } else {
       const found = workers.find(w => w.username === loginUsername && w.password === loginPassword);
       if (found) {
         setRole('worker'); setCurrentUser(found); setShowLoginModal(false);
-      } else alert('Error en trabajador');
+      } else alert('Error: Usuario o contraseña de trabajador incorrectos.');
     }
     setLoginUsername(''); setLoginPassword('');
   };
@@ -246,8 +225,8 @@ const App: React.FC = () => {
               <h1 className="text-xl font-bold bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent leading-tight">FleetMaster AI</h1>
               {syncId && (
                 <div className="flex items-center gap-1 text-[9px] text-green-400 uppercase font-bold tracking-widest">
-                  <Cloud className="w-2.5 h-2.5" />
-                  Conectado a Nube
+                  <Cloud className="w-2.5 h-2.5 animate-pulse" />
+                  Sincronización Activa
                 </div>
               )}
             </div>
@@ -255,50 +234,35 @@ const App: React.FC = () => {
 
           <div className="flex items-center gap-3">
             {syncId && (
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 rounded-full border border-slate-700">
+              <button 
+                onClick={() => pullFromCloud(syncId)}
+                disabled={isSyncing}
+                className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 rounded-full border border-slate-700 hover:bg-slate-800 transition-colors"
+              >
                 <div className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-blue-500 animate-pulse' : 'bg-green-500'}`} />
                 <span className="text-[10px] font-bold text-slate-400 hidden sm:inline">
-                  {isSyncing ? 'Sincronizando...' : lastSyncTime ? `Sinc: ${lastSyncTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}` : 'Listo'}
+                  {isSyncing ? 'Sincronizando...' : lastSyncTime ? `Hoy, ${lastSyncTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}` : 'Actualizado'}
                 </span>
-                <button onClick={() => pullFromCloud(syncId)} className="p-1 hover:bg-slate-700 rounded-md transition-colors" title="Actualizar datos ahora">
-                  <RefreshCw className={`w-3 h-3 text-slate-400 ${isSyncing ? 'animate-spin' : ''}`} />
-                </button>
-              </div>
-            )}
-
-            {isAdmin && (
-               <button 
-                onClick={() => {
-                  const data = { vehicles, workers, works, logs, priceHistory };
-                  const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(data));
-                  const url = `${window.location.origin}${window.location.pathname}#${compressed}`;
-                  navigator.clipboard.writeText(url);
-                  alert("¡Enlace de sesión copiado! Comparte este enlace para que otros carguen tus datos actuales.");
-                }}
-                className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg border border-slate-700 flex items-center gap-2 text-xs font-bold"
-                title="Generar enlace de sesión"
-              >
-                <Share2 className="w-4 h-4" />
-                <span className="hidden lg:inline">Compartir Sesión</span>
+                <RefreshCw className={`w-3 h-3 text-slate-400 ${isSyncing ? 'animate-spin' : ''}`} />
               </button>
             )}
 
             {role === 'none' ? (
               <button onClick={() => setShowLoginModal(true)} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-sm font-bold shadow-lg">Acceder</button>
             ) : (
-              <div className="flex items-center gap-4">
-                <div className="hidden md:flex flex-col items-end">
-                  <span className="text-xs font-bold">{role === 'admin' ? 'Admin' : currentUser?.name}</span>
+              <div className="flex items-center gap-2">
+                <div className="hidden md:flex flex-col items-end mr-2">
+                  <span className="text-xs font-bold">{role === 'admin' ? 'Administrador' : currentUser?.name}</span>
                   <span className="text-[9px] text-slate-500 uppercase">{role}</span>
                 </div>
-                <button onClick={() => { if(confirm('¿Salir?')) setRole('none'); }} className="p-2 bg-red-500/10 text-red-400 rounded-lg border border-red-500/20"><LogOut className="w-4 h-4" /></button>
+                <button onClick={() => { if(confirm('¿Cerrar sesión?')) setRole('none'); }} className="p-2 bg-red-500/10 text-red-400 rounded-lg border border-red-500/20 hover:bg-red-500/20 transition-colors"><LogOut className="w-4 h-4" /></button>
               </div>
             )}
           </div>
         </div>
         <div className="max-w-7xl mx-auto px-4 border-t border-slate-800 flex overflow-x-auto no-scrollbar">
           {navItems.map(item => (
-            <button key={item.id} onClick={() => setActiveTab(item.id as TabType)} className={`flex items-center gap-2 px-6 py-4 text-sm font-medium transition-all relative whitespace-nowrap ${activeTab === item.id ? 'text-blue-400' : 'text-slate-400'}`}>
+            <button key={item.id} onClick={() => setActiveTab(item.id as TabType)} className={`flex items-center gap-2 px-6 py-4 text-sm font-medium transition-all relative whitespace-nowrap ${activeTab === item.id ? 'text-blue-400' : 'text-slate-400 hover:text-slate-200'}`}>
               <item.icon className="w-4 h-4" /> {item.label}
               {activeTab === item.id && <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-500 rounded-t-full" />}
             </button>
@@ -334,7 +298,7 @@ const App: React.FC = () => {
       {showLoginModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 max-w-md w-full animate-in zoom-in-95">
-            <h2 className="text-2xl font-bold mb-6 text-center">Identificación</h2>
+            <h2 className="text-2xl font-bold mb-6 text-center">Identificación de Usuario</h2>
             <div className="flex bg-slate-800 p-1 rounded-xl mb-6">
               <button onClick={() => setLoginType('worker')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${loginType === 'worker' ? 'bg-blue-600' : 'text-slate-400'}`}>Trabajador</button>
               <button onClick={() => setLoginType('admin')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${loginType === 'admin' ? 'bg-blue-600' : 'text-slate-400'}`}>Admin</button>
