@@ -2,10 +2,22 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Permite leer y escribir en documentos de flotas si el usuario está logueado
-    // Se recomienda mejorar esto validando el acceso específico por ID en producción
     match /fleets/{fleetId} {
-      allow read, write: if request.auth != null;
+      // Función para verificar si el usuario es miembro de la flota
+      function isMember() {
+        return exists(/databases/$(database)/documents/fleets/$(fleetId)/members/$(request.auth.uid));
+      }
+      
+      // Permitir lectura/escritura solo si es miembro
+      allow read, write: if request.auth != null && isMember();
+
+      // Reglas para la subcolección de miembros
+      match /members/{userId} {
+        allow read: if request.auth != null && isMember();
+        // Solo admins de la flota pueden añadir/quitar miembros
+        allow write: if request.auth != null && 
+          get(/databases/$(database)/documents/fleets/$(fleetId)/members/$(request.auth.uid)).data.role == 'admin';
+      }
     }
   }
 }
