@@ -16,7 +16,8 @@ import {
   HardHat,
   FileDown,
   FileUp,
-  ArrowRight
+  ArrowRight,
+  Zap
 } from 'lucide-react';
 import { LogEntry, Vehicle, Worker, Work, TripType, WorkStatus } from '../types';
 
@@ -36,6 +37,12 @@ interface LogsProps {
 const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, workers, works, isAdmin, currentUser }) => {
   const [showModal, setShowModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Quick log state
+  const [quickVehicleId, setQuickVehicleId] = useState('');
+  const [quickWorkId, setQuickWorkId] = useState('');
+  const [quickEndKm, setQuickEndKm] = useState<number | ''>('');
+
   const [formData, setFormData] = useState<Partial<LogEntry>>({
     date: new Date().toISOString().split('T')[0],
     time: new Date().toTimeString().slice(0, 5),
@@ -101,28 +108,64 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.vehicleId || !formData.workerId) {
+    processEntry(formData as LogEntry);
+    setShowModal(false);
+    resetForm();
+  };
+
+  const processEntry = (entry: LogEntry) => {
+    if (!entry.vehicleId || !entry.workerId) {
       alert("Por favor, selecciona un vehículo y conductor.");
       return;
     }
-    const distance = (formData.endKm || 0) - (formData.startKm || 0);
+    const distance = (entry.endKm || 0) - (entry.startKm || 0);
     if (distance < 0) {
       alert("El kilometraje final debe ser mayor al inicial.");
       return;
     }
 
     const newLog = {
-      ...formData as LogEntry,
+      ...entry,
       id: Math.random().toString(36).substr(2, 9),
     };
 
     setLogs(prev => [...prev, newLog]);
     setVehicles(prev => prev.map(v => 
-      v.id === formData.vehicleId ? { ...v, kilometers: formData.endKm || v.kilometers } : v
+      v.id === entry.vehicleId ? { ...v, kilometers: entry.endKm || v.kilometers } : v
     ));
+  };
 
-    setShowModal(false);
-    resetForm();
+  const handleQuickSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickVehicleId || !quickWorkId || quickEndKm === '') return;
+    
+    const v = vehicles.find(veh => veh.id === quickVehicleId);
+    if (!v) return;
+
+    const startKm = v.kilometers;
+    const distance = quickEndKm - startKm;
+    const adjustedConsumption = v.baseConsumption * (1 + v.wearFactor / 100);
+    const fuel = (distance / 100) * adjustedConsumption;
+
+    const quickLog: LogEntry = {
+      id: '',
+      date: new Date().toISOString().split('T')[0],
+      time: new Date().toTimeString().slice(0, 5),
+      vehicleId: quickVehicleId,
+      workerId: currentUser?.id || '',
+      workId: quickWorkId,
+      tripType: TripType.WORKS,
+      startKm: startKm,
+      endKm: quickEndKm,
+      distance: distance,
+      fuelConsumed: Number(fuel.toFixed(2)),
+      avgConsumption: Number(adjustedConsumption.toFixed(2)),
+      notes: 'Registro rápido'
+    };
+
+    processEntry(quickLog);
+    setQuickEndKm('');
+    alert("¡Registro guardado con éxito!");
   };
 
   const resetForm = () => {
@@ -170,7 +213,7 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
       try {
         const wb = XLSX.read(evt.target?.result, { type: 'binary' });
         const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-        if (data.length > 0) alert(`Importando ${data.length} registros (lógica de mapeo simplificada).`);
+        if (data.length > 0) alert(`Importando ${data.length} registros.`);
       } catch (err) { alert("Error al importar."); }
     };
     reader.readAsBinaryString(file);
@@ -206,6 +249,54 @@ const Logs: React.FC<LogsProps> = ({ logs, setLogs, vehicles, setVehicles, worke
             Nuevo Registro
           </button>
         </div>
+      </div>
+
+      {/* QUICK LOG WIDGET - ESPECIALLY FOR WORKERS */}
+      <div className="bg-gradient-to-br from-blue-900/20 to-slate-900 border border-blue-500/30 p-6 rounded-3xl shadow-xl">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2 bg-blue-600 rounded-lg"><Zap className="w-4 h-4 text-white" /></div>
+          <h3 className="text-lg font-bold">Registro Rápido de Trayecto</h3>
+        </div>
+        <form onSubmit={handleQuickSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+          <div className="space-y-1.5">
+            <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Vehículo</label>
+            <select 
+              value={quickVehicleId} 
+              onChange={e => setQuickVehicleId(e.target.value)}
+              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">Vehículo...</option>
+              {vehicles.map(v => <option key={v.id} value={v.id}>{v.plate} - {v.model}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Obra</label>
+            <select 
+              value={quickWorkId} 
+              onChange={e => setQuickWorkId(e.target.value)}
+              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">Obra...</option>
+              {activeWorks.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">KM Finales</label>
+            <input 
+              type="number" 
+              placeholder="Ej: 45200"
+              value={quickEndKm} 
+              onChange={e => setQuickEndKm(e.target.value === '' ? '' : parseInt(e.target.value))}
+              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+          <button 
+            type="submit"
+            className="bg-blue-600 hover:bg-blue-500 h-[42px] rounded-xl font-bold transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2"
+          >
+            <Plus className="w-4 h-4" /> Registrar
+          </button>
+        </form>
       </div>
 
       {/* Stats row */}

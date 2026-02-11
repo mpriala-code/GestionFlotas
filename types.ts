@@ -35,6 +35,13 @@ export interface MaintenanceRecord {
   type: 'Preventivo' | 'Correctivo' | 'Revisión ITV' | 'Otro';
 }
 
+export interface Installment {
+  id: string;
+  date: string;
+  amount: number;
+  paid: boolean;
+}
+
 export interface LoanInfo {
   active: boolean;
   totalAmount: number;
@@ -42,6 +49,7 @@ export interface LoanInfo {
   startDate: string;
   endDate: string;
   remainingAmount: number;
+  installments?: Installment[]; // List of monthly quotas
 }
 
 export interface Vehicle {
