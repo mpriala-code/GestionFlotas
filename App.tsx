@@ -1,28 +1,9 @@
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { 
-  LayoutDashboard, 
-  Truck, 
-  Users, 
-  HardHat, 
-  ClipboardList, 
-  BarChart3, 
-  Wrench, 
-  LogIn, 
-  LogOut,
-  Bell,
-  Plus,
-  AlertTriangle,
-  Settings as SettingsIcon,
-  UserCircle,
-  ShieldCheck,
-  Share2,
-  Cloud,
-  CloudOff,
-  RefreshCw,
-  Wifi,
-  WifiOff,
-  Lock
+  LayoutDashboard, Truck, Users, HardHat, ClipboardList, BarChart3, Wrench, LogIn, LogOut,
+  Bell, Plus, AlertTriangle, Settings as SettingsIcon, UserCircle, ShieldCheck, Share2,
+  Cloud, CloudOff, RefreshCw, Wifi, WifiOff, Lock
 } from 'lucide-react';
 import { 
   Vehicle, Worker, Work, LogEntry, TabType, 
@@ -31,6 +12,7 @@ import {
 import { 
   INITIAL_VEHICLES, INITIAL_WORKERS, INITIAL_WORKS, INITIAL_LOGS 
 } from './constants';
+import { cloudApi } from './api';
 
 import Dashboard from './components/Dashboard';
 import Vehicles from './components/Vehicles';
@@ -64,7 +46,6 @@ const getStorageItem = <T,>(key: string, defaultValue: T): T => {
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   
-  // Persisted local state
   const [role, setRole] = useState<AuthRole>(() => getStorageItem('fleet_role', 'none'));
   const [currentUser, setCurrentUser] = useState<Worker | null>(() => getStorageItem('fleet_current_user', null));
   const [syncId, setSyncId] = useState<string>(() => getStorageItem('fleet_sync_id', ''));
@@ -90,7 +71,6 @@ const App: React.FC = () => {
   const isAdmin = role === 'admin';
   const isWorker = role === 'worker';
   
-  // Track timestamps for LWW (Last Write Wins) strategy
   const lastUpdateRef = useRef<number>(Number(localStorage.getItem('fleet_last_updated') || Date.now()));
 
   // --- CLOUD SYNC LOGIC ---
@@ -99,27 +79,21 @@ const App: React.FC = () => {
     if (!currentSyncId) return;
     if (!quiet) setIsSyncing(true);
     try {
-      const response = await fetch(`https://api.npoint.io/${currentSyncId}`, {
-        headers: { 'Cache-Control': 'no-cache' }
-      });
-      if (response.ok) {
-        const remoteData = await response.json();
-        // Solo actualizamos si los datos remotos son realmente más nuevos
-        if (remoteData.lastUpdated && remoteData.lastUpdated > lastUpdateRef.current) {
-          if (remoteData.vehicles) setVehicles(remoteData.vehicles);
-          if (remoteData.workers) setWorkers(remoteData.workers);
-          if (remoteData.works) setWorks(remoteData.works);
-          if (remoteData.logs) setLogs(remoteData.logs);
-          if (remoteData.priceHistory) setPriceHistory(remoteData.priceHistory);
-          
-          lastUpdateRef.current = remoteData.lastUpdated;
-          localStorage.setItem('fleet_last_updated', remoteData.lastUpdated.toString());
-          setLastSyncTime(new Date());
-        }
+      const remoteData = await cloudApi.getData(currentSyncId);
+      if (remoteData && remoteData.lastUpdated > lastUpdateRef.current) {
+        if (remoteData.vehicles) setVehicles(remoteData.vehicles);
+        if (remoteData.workers) setWorkers(remoteData.workers);
+        if (remoteData.works) setWorks(remoteData.works);
+        if (remoteData.logs) setLogs(remoteData.logs);
+        if (remoteData.priceHistory) setPriceHistory(remoteData.priceHistory);
+        
+        lastUpdateRef.current = remoteData.lastUpdated;
+        localStorage.setItem('fleet_last_updated', remoteData.lastUpdated.toString());
+        setLastSyncTime(new Date());
       }
       setIsOnline(true);
     } catch (e) {
-      console.error("Error descargando de la nube:", e);
+      console.warn("Cloud pull failed, using local data", e);
       setIsOnline(false);
     } finally {
       if (!quiet) setIsSyncing(false);
@@ -132,44 +106,30 @@ const App: React.FC = () => {
     try {
       const timestamp = Date.now();
       const payload = { ...data, lastUpdated: timestamp };
+      await cloudApi.putData(currentSyncId, payload);
       
-      const response = await fetch(`https://api.npoint.io/${currentSyncId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      
-      if (response.ok) {
-        lastUpdateRef.current = timestamp;
-        localStorage.setItem('fleet_last_updated', timestamp.toString());
-        setLastSyncTime(new Date());
-        setIsOnline(true);
-      }
+      lastUpdateRef.current = timestamp;
+      localStorage.setItem('fleet_last_updated', timestamp.toString());
+      setLastSyncTime(new Date());
+      setIsOnline(true);
     } catch (e) {
-      console.error("Error sincronizando con la nube:", e);
+      console.error("Cloud push failed", e);
       setIsOnline(false);
     } finally {
       setIsSyncing(false);
     }
   }, []);
 
-  // Sync initialization
   useEffect(() => {
-    if (syncId && role !== 'none') {
-      pullFromCloud(syncId);
-    }
+    if (syncId && role !== 'none') pullFromCloud(syncId);
   }, [syncId, pullFromCloud, role]);
 
-  // AUTO-POLLING
   useEffect(() => {
     if (!syncId || role === 'none') return;
-    const interval = setInterval(() => {
-      pullFromCloud(syncId, true);
-    }, 8000);
+    const interval = setInterval(() => pullFromCloud(syncId, true), 8000);
     return () => clearInterval(interval);
   }, [syncId, pullFromCloud, role]);
 
-  // Auto-save locales
   useEffect(() => {
     localStorage.setItem('fleet_vehicles', JSON.stringify(vehicles));
     localStorage.setItem('fleet_workers', JSON.stringify(workers));
@@ -181,12 +141,11 @@ const App: React.FC = () => {
     localStorage.setItem('fleet_sync_id', JSON.stringify(syncId));
   }, [vehicles, workers, works, logs, priceHistory, role, currentUser, syncId]);
 
-  // AUTO-PUSH
   useEffect(() => {
     if (syncId && (isAdmin || isWorker)) {
       const timeout = setTimeout(() => {
         pushToCloud(syncId, { vehicles, workers, works, logs, priceHistory });
-      }, 1500); 
+      }, 2000); 
       return () => clearTimeout(timeout);
     }
   }, [vehicles, workers, works, logs, priceHistory, syncId, isAdmin, isWorker, pushToCloud]);
@@ -250,7 +209,6 @@ const App: React.FC = () => {
     return items;
   }, [role]);
 
-  // Si no hay sesión iniciada, mostrar solo la pantalla de login
   if (role === 'none') {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 text-slate-50 p-6">
@@ -316,10 +274,7 @@ const App: React.FC = () => {
               </button>
             </form>
           </div>
-          
-          <p className="mt-8 text-center text-xs text-slate-600 font-medium">
-            &copy; 2025 FleetMaster AI. Todos los derechos reservados.
-          </p>
+          <p className="mt-8 text-center text-xs text-slate-600 font-medium">&copy; 2025 FleetMaster AI. Todos los derechos reservados.</p>
         </div>
       </div>
     );
@@ -336,13 +291,11 @@ const App: React.FC = () => {
               <div className="flex items-center gap-1.5">
                  {syncId ? (
                     <div className="flex items-center gap-1 text-[9px] text-green-400 uppercase font-bold tracking-widest">
-                      <Wifi className="w-2.5 h-2.5 animate-pulse" />
-                      Sincronizado
+                      <Wifi className="w-2.5 h-2.5 animate-pulse" /> Sincronizado
                     </div>
                  ) : (
                     <div className="flex items-center gap-1 text-[9px] text-slate-500 uppercase font-bold tracking-widest">
-                      <WifiOff className="w-2.5 h-2.5" />
-                      Modo Local
+                      <WifiOff className="w-2.5 h-2.5" /> Modo Local
                     </div>
                  )}
               </div>
@@ -366,7 +319,6 @@ const App: React.FC = () => {
                 </button>
               </div>
             )}
-
             <div className="flex items-center gap-4">
               <div className="hidden md:flex flex-col items-end">
                 <span className="text-xs font-bold">{role === 'admin' ? 'Administrador' : currentUser?.name}</span>
