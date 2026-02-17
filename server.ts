@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import admin from 'firebase-admin';
 
+// Inicialización de Firebase Admin (Cloud Run usa la cuenta de servicio por defecto)
 if (!admin.apps.length) {
   admin.initializeApp();
 }
@@ -11,101 +12,60 @@ const db = admin.firestore();
 const app = express();
 
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '20mb' })); // Permitir payloads grandes para la flota
 
-// Middleware de Autenticación
-const authenticate = async (req: any, res: any, next: any) => {
-  const token = req.headers.authorization?.split('Bearer ')[1];
-  if (!token) return res.status(401).send('No autorizado');
-  try {
-    req.user = await admin.auth().verifyIdToken(token);
-    next();
-  } catch (error) {
-    res.status(401).send('Token inválido');
-  }
-};
-
-// Middleware de Verificación de Membresía
-const checkMembership = async (req: any, res: any, next: any) => {
-  const { fleetId } = req.params;
-  const memberDoc = await db.collection('fleets').doc(fleetId).collection('members').doc(req.user.uid).get();
-  
-  if (!memberDoc.exists) {
-    return res.status(403).send('No tienes acceso a esta flota');
-  }
-  req.userRole = memberDoc.data()?.role;
-  next();
-};
+const COLLECTION_NAME = 'items';
+const DOCUMENT_ID = 'GLOBAL_FLEET_STATE';
 
 /**
- * POST /api/fleets
- * Crea una nueva flota y asigna al creador como admin
+ * GET /items
+ * Devuelve todos los items con fleetId == "GLOBAL"
  */
-app.post('/api/fleets', authenticate, async (req: any, res: any) => {
-  const { name } = req.body;
-  const fleetId = name.toLowerCase().replace(/\s+/g, '-') + '-' + Math.random().toString(36).substring(2, 7);
-  
+app.get('/items', async (req, res) => {
   try {
-    const batch = db.batch();
-    const fleetRef = db.collection('fleets').doc(fleetId);
-    const memberRef = fleetRef.collection('members').doc(req.user.uid);
+    const snapshot = await db.collection(COLLECTION_NAME)
+      .where('fleetId', '==', 'GLOBAL')
+      .limit(1)
+      .get();
 
-    batch.set(fleetRef, { 
-      name, 
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      payload: { vehicles: [], workers: [], works: [], logs: [], priceHistory: [] }
-    });
-    
-    batch.set(memberRef, { 
-      role: 'admin', 
-      email: req.user.email,
-      joinedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
+    if (snapshot.empty) {
+      return res.json({ data: null });
+    }
 
-    await batch.commit();
-    res.json({ fleetId, name });
+    const docData = snapshot.docs[0].data();
+    res.json(docData);
   } catch (error: any) {
+    console.error("Error GET /items:", error);
     res.status(500).send(error.message);
   }
 });
 
 /**
- * POST /api/fleets/:fleetId/members
- * Invitar a un miembro (Solo Admins)
+ * POST /items
+ * Guarda el contenido con fleetId: "GLOBAL"
  */
-app.post('/api/fleets/:fleetId/members', authenticate, checkMembership, async (req: any, res: any) => {
-  if (req.userRole !== 'admin') return res.status(403).send('Solo los admins pueden invitar');
-  
-  const { email, role = 'member' } = req.body;
-  const { fleetId } = req.params;
-
+app.post('/items', async (req, res) => {
   try {
-    const user = await admin.auth().getUserByEmail(email);
-    await db.collection('fleets').doc(fleetId).collection('members').doc(user.uid).set({
-      role,
-      email,
-      invitedBy: req.user.uid,
-      joinedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
+    const { content } = req.body;
+    
+    const payload = {
+      fleetId: "GLOBAL",
+      data: content,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+
+    // Usamos set con merge para asegurar que el documento exista y se actualice
+    await db.collection(COLLECTION_NAME).doc(DOCUMENT_ID).set(payload, { merge: true });
+    
     res.json({ success: true });
   } catch (error: any) {
-    res.status(404).send('Usuario no encontrado en Firebase Auth');
+    console.error("Error POST /items:", error);
+    res.status(500).send(error.message);
   }
 });
 
-app.get('/api/fleet/:fleetId', authenticate, checkMembership, async (req: any, res: any) => {
-  const doc = await db.collection('fleets').doc(req.params.fleetId).get();
-  res.json(doc.data());
-});
-
-app.post('/api/fleet/:fleetId', authenticate, checkMembership, async (req: any, res: any) => {
-  await db.collection('fleets').doc(req.params.fleetId).update({
-    payload: req.body.payload,
-    lastUpdater: req.user.uid,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp()
-  });
-  res.json({ success: true });
-});
-
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log(`🚀 FleetMaster Multi-Tenant en puerto ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 FleetMaster Backend GLOBAL corriendo en puerto ${PORT}`);
+});

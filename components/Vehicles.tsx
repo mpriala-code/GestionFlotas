@@ -1,9 +1,8 @@
 
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState } from 'react';
 import { 
-  Plus, Edit2, Trash2, Search, Info, Euro, Calendar, Gauge, FileText, Shield, 
-  Wrench, ChevronDown, ChevronUp, FileDown, FileUp, CreditCard, CheckCircle2,
-  AlertTriangle, XCircle, RefreshCw
+  Plus, Edit2, Trash2, Search, Gauge, CreditCard, CheckCircle2,
+  AlertTriangle, FileDown, Calendar, Eye, Info, Car, Wallet
 } from 'lucide-react';
 import { Vehicle, MaintenanceStatus, Installment } from '../types';
 
@@ -18,15 +17,12 @@ interface VehiclesProps {
 const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
+  const [showDetailsModal, setShowDetailsModal] = useState<Vehicle | null>(null);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showLoanModal, setShowLoanModal] = useState<string | null>(null);
   
-  // New installment form state
   const [newInsDate, setNewInsDate] = useState(new Date().toISOString().split('T')[0]);
   const [newInsAmount, setNewInsAmount] = useState(0);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState<Partial<Vehicle>>({
     plate: '',
@@ -34,9 +30,9 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
     type: 'Furgoneta',
     vin: '',
     year: new Date().getFullYear(),
-    purchaseDate: '',
+    purchaseDate: new Date().toISOString().split('T')[0],
     kilometers: 0,
-    baseConsumption: 0,
+    baseConsumption: 8.0,
     wearFactor: 0,
     taxDate: '',
     taxAmount: 0,
@@ -93,7 +89,7 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
     setFormData({
       plate: '', model: '', type: 'Furgoneta', vin: '',
       year: new Date().getFullYear(), purchaseDate: '', kilometers: 0,
-      baseConsumption: 0, wearFactor: 0, taxDate: '', taxAmount: 0,
+      baseConsumption: 8.0, wearFactor: 0, taxDate: '', taxAmount: 0,
       nextGeneralPayment: '', insuranceCost: 0, insuranceExpiry: '',
       itvDate: '', lastMaintenance: '', nextMaintenance: '',
       maintStatus: MaintenanceStatus.UP_TO_DATE, maintNotes: '',
@@ -102,13 +98,9 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
   };
 
   const handleDelete = (id: string) => {
-    if (confirm('¿Estás seguro de que quieres eliminar este vehículo de la flota?')) {
+    if (confirm('¿Estás seguro de que quieres eliminar este vehículo?')) {
       setVehicles(prev => prev.filter(v => v.id !== id));
     }
-  };
-
-  const toggleExpand = (id: string) => {
-    setExpandedId(expandedId === id ? null : id);
   };
 
   const toggleInstallment = (vehicleId: string, installmentId: string) => {
@@ -176,27 +168,18 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
     }));
   };
 
-  const clearInstallments = (vehicleId: string) => {
-    if (confirm('¿Deseas borrar todo el historial de cuotas de este vehículo?')) {
-      setVehicles(prev => prev.map(v => 
-        v.id === vehicleId ? { ...v, loan: { ...v.loan, installments: [], remainingAmount: v.loan.totalAmount } } : v
-      ));
-    }
-  };
-
   const handleExport = () => {
     const exportData = vehicles.map(v => ({
       'Matrícula': v.plate,
       'Modelo': v.model,
       'KM Totales': v.kilometers,
-      'Consumo Base': v.baseConsumption,
-      'Prestamo Activo': v.loan.active ? 'SÍ' : 'NO',
+      'Préstamo Activo': v.loan.active ? 'SÍ' : 'NO',
       'Pendiente (€)': v.loan.remainingAmount
     }));
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Vehiculos");
-    XLSX.writeFile(wb, `Inventario_Flota_${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "Vehículos");
+    XLSX.writeFile(wb, `Flota_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   const activeVehicleForLoan = vehicles.find(v => v.id === showLoanModal);
@@ -216,16 +199,14 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
               placeholder="Buscar por matrícula o modelo..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm"
+              className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
             />
           </div>
-          
-          <button onClick={handleExport} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-4 py-2.5 rounded-xl font-bold transition-all border border-slate-700 text-xs">
-            <FileDown className="w-4 h-4 text-blue-400" /> Exportar Planilla
+          <button onClick={handleExport} className="bg-slate-800 hover:bg-slate-700 px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 border border-slate-700 transition-all">
+            <FileDown className="w-4 h-4" /> Exportar
           </button>
-
           {isAdmin && (
-            <button onClick={() => setShowModal(true)} className="bg-blue-600 hover:bg-blue-500 px-5 py-2.5 rounded-xl flex items-center gap-2 font-bold transition-all shadow-lg shadow-blue-600/20 text-sm">
+            <button onClick={() => setShowModal(true)} className="bg-blue-600 hover:bg-blue-500 px-5 py-2.5 rounded-xl flex items-center gap-2 font-bold shadow-lg shadow-blue-600/20 text-sm transition-all active:scale-95">
               <Plus className="w-5 h-5" /> Nuevo Vehículo
             </button>
           )}
@@ -234,81 +215,224 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredVehicles.map(v => (
-          <div key={v.id} className="bg-slate-900/50 border border-slate-800 rounded-3xl overflow-hidden group hover:border-blue-500/30 transition-all shadow-xl">
-            <div className="p-7">
+          <div key={v.id} className="bg-slate-900/40 border border-slate-800 rounded-[2rem] overflow-hidden group hover:border-blue-500/40 transition-all duration-300 shadow-xl flex flex-col">
+            <div className="p-6 flex-1">
               <div className="flex justify-between items-start mb-6">
-                <div>
-                  <h3 className="text-2xl font-black tracking-tight">{v.plate}</h3>
-                  <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">{v.model} • {v.type}</p>
+                <div className="bg-blue-600/10 p-3 rounded-2xl">
+                  <Car className="w-6 h-6 text-blue-500" />
                 </div>
-                <div className="flex gap-1.5">
-                  {isAdmin && (
-                    <div className="flex gap-1.5">
-                      <button onClick={() => openEdit(v)} className="p-2.5 bg-slate-800 hover:bg-blue-600/20 rounded-xl text-blue-400 transition-all"><Edit2 className="w-4 h-4" /></button>
-                      <button onClick={() => handleDelete(v.id)} className="p-2.5 bg-slate-800 hover:bg-red-600/20 rounded-xl text-red-400 transition-all"><Trash2 className="w-4 h-4" /></button>
-                    </div>
-                  )}
-                  <button onClick={() => toggleExpand(v.id)} className="p-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-400 transition-colors">
-                    {expandedId === v.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                  </button>
+                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                   <button onClick={() => handleDelete(v.id)} className="p-2 hover:bg-red-500/10 text-red-500 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 mb-6">
-                <div className="bg-slate-800/40 rounded-2xl p-4 border border-slate-800">
-                  <p className="text-[10px] text-slate-500 uppercase font-bold mb-1 tracking-widest">Odómetro</p>
-                  <p className="font-bold flex items-center gap-2"><Gauge className="w-4 h-4 text-blue-400" /> {v.kilometers.toLocaleString()} <span className="text-[10px] text-slate-500">KM</span></p>
-                </div>
-                <div className="bg-slate-800/40 rounded-2xl p-4 border border-slate-800">
-                  <p className="text-[10px] text-slate-500 uppercase font-bold mb-1 tracking-widest">Consumo</p>
-                  <p className="font-bold text-slate-200"> {v.baseConsumption} <span className="text-[10px] text-slate-500 font-bold">L/100</span></p>
-                </div>
+              <div className="mb-6">
+                <h3 className="text-3xl font-black tracking-tighter text-white mb-1">{v.plate}</h3>
+                <p className="text-slate-500 text-xs font-black uppercase tracking-[0.2em]">{v.model} • {v.type}</p>
               </div>
 
-              <div className="space-y-3">
-                <div className="flex justify-between items-center bg-slate-800/20 p-3 rounded-2xl border border-slate-800">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-yellow-500/10 rounded-lg">
-                      <CreditCard className="w-4 h-4 text-yellow-500" />
-                    </div>
-                    <span className="text-xs font-bold text-slate-300">Préstamo / Financiación</span>
-                  </div>
-                  <button 
-                    onClick={() => setShowLoanModal(v.id)}
-                    className="px-3 py-1.5 bg-yellow-500 hover:bg-yellow-400 text-slate-950 rounded-xl text-[10px] font-black uppercase transition-all shadow-lg shadow-yellow-500/20 active:scale-95"
-                  >
-                    Cotas
-                  </button>
+              <div className="grid grid-cols-2 gap-3 mb-6">
+                <div className="bg-slate-800/30 p-4 rounded-2xl border border-slate-800/50">
+                   <p className="text-[10px] text-slate-500 font-black uppercase mb-1">Kilómetros</p>
+                   <p className="font-bold flex items-center gap-2 text-slate-200"><Gauge className="w-4 h-4 text-blue-500" /> {v.kilometers.toLocaleString()}</p>
+                </div>
+                <div className="bg-slate-800/30 p-4 rounded-2xl border border-slate-800/50">
+                   <p className="text-[10px] text-slate-500 font-black uppercase mb-1">Préstamo</p>
+                   {v.loan.active ? (
+                     <p className="font-bold text-yellow-500 flex items-center gap-2"><Wallet className="w-4 h-4" /> Activo</p>
+                   ) : (
+                     <p className="font-bold text-slate-500 flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> Pagado</p>
+                   )}
                 </div>
               </div>
 
               {v.loan.active && (
-                <div className="mt-6 pt-4 border-t border-slate-800/50">
-                  <div className="flex justify-between text-[11px] mb-2 font-bold uppercase tracking-wider">
-                    <span className="text-slate-500">Pendiente de Pago</span>
-                    <span className="text-yellow-500">{v.loan.remainingAmount.toLocaleString()} €</span>
+                <div className="space-y-2 mb-4">
+                  <div className="flex justify-between items-end">
+                    <span className="text-[10px] text-slate-500 font-black uppercase">Pendiente de amortizar</span>
+                    <span className="text-sm font-black text-yellow-500">{v.loan.remainingAmount.toLocaleString()} €</span>
                   </div>
-                  <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden shadow-inner">
-                    <div 
-                      className="bg-yellow-500 h-full transition-all duration-700 ease-out shadow-[0_0_10px_rgba(234,179,8,0.3)]" 
-                      style={{ width: `${Math.min(100, (1 - v.loan.remainingAmount / (v.loan.totalAmount || 1)) * 100)}%` }} 
-                    />
+                  <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                     <div 
+                      className="bg-yellow-500 h-full transition-all duration-1000" 
+                      style={{ width: `${Math.max(5, Math.min(100, (1 - (v.loan.remainingAmount / (v.loan.totalAmount || 1))) * 100))}%` }} 
+                     />
                   </div>
                 </div>
               )}
+            </div>
+
+            <div className="p-4 bg-slate-800/20 border-t border-slate-800 flex gap-3">
+              <button 
+                onClick={() => setShowDetailsModal(v)}
+                className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 py-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 transition-all"
+              >
+                <Eye className="w-4 h-4" /> Ver Detalles
+              </button>
+              <button 
+                onClick={() => openEdit(v)}
+                className="flex-1 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 py-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 transition-all border border-blue-500/20"
+              >
+                <Edit2 className="w-4 h-4" /> Editar
+              </button>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Loan Installments Modal */}
+      {/* Detail Modal (View Only) */}
+      {showDetailsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] w-full max-w-2xl shadow-2xl animate-in zoom-in-95 my-8 overflow-hidden">
+            <div className="p-8 border-b border-slate-800 flex justify-between items-center bg-gradient-to-r from-blue-600/10 to-transparent">
+              <div>
+                <h2 className="text-3xl font-black tracking-tighter">{showDetailsModal.plate}</h2>
+                <p className="text-slate-500 font-bold uppercase text-xs tracking-widest">{showDetailsModal.model} • Ficha Técnica</p>
+              </div>
+              <button onClick={() => setShowDetailsModal(null)} className="text-slate-500 hover:text-white text-4xl font-light">&times;</button>
+            </div>
+            
+            <div className="p-8 space-y-8">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
+                {[
+                  { label: 'Kilómetros', value: `${showDetailsModal.kilometers.toLocaleString()} km`, icon: Gauge, color: 'text-blue-500' },
+                  { label: 'Año', value: showDetailsModal.year, icon: Calendar, color: 'text-slate-400' },
+                  { label: 'Consumo', value: `${showDetailsModal.baseConsumption} L/100`, icon: Car, color: 'text-green-500' },
+                  { label: 'Fecha ITV', value: showDetailsModal.itvDate || 'Pendiente', icon: Info, color: 'text-orange-500' },
+                  { label: 'Seguro', value: `${showDetailsModal.insuranceCost}€`, icon: Wallet, color: 'text-purple-500' },
+                  { label: 'Amortizado', value: showDetailsModal.loan.active ? `${(showDetailsModal.loan.totalAmount - showDetailsModal.loan.remainingAmount).toLocaleString()}€` : '100%', icon: CheckCircle2, color: 'text-yellow-500' },
+                ].map((item, i) => (
+                  <div key={i} className="bg-slate-800/30 p-4 rounded-2xl border border-slate-800">
+                    <item.icon className={`w-5 h-5 ${item.color} mb-2`} />
+                    <p className="text-[10px] text-slate-500 font-black uppercase mb-1">{item.label}</p>
+                    <p className="font-bold text-slate-100">{item.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-slate-800/20 p-6 rounded-3xl border border-slate-800">
+                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Notas de Mantenimiento</h4>
+                <p className="text-sm text-slate-300 italic">"{showDetailsModal.maintNotes || 'No hay notas registradas.'}"</p>
+              </div>
+
+              {showDetailsModal.loan.active && (
+                <div className="bg-yellow-500/5 p-6 rounded-3xl border border-yellow-500/20 flex justify-between items-center">
+                   <div className="flex items-center gap-4">
+                     <div className="p-3 bg-yellow-500/10 rounded-2xl"><Wallet className="w-6 h-6 text-yellow-500" /></div>
+                     <div>
+                       <p className="text-xs font-bold text-yellow-500 uppercase">Estado de la Financiación</p>
+                       <p className="text-slate-400 text-xs">Cuota mensual: {showDetailsModal.loan.monthlyFee}€</p>
+                     </div>
+                   </div>
+                   <button 
+                    onClick={() => { setShowDetailsModal(null); setShowLoanModal(showDetailsModal.id); }}
+                    className="bg-yellow-500 text-slate-950 px-6 py-2 rounded-xl font-black text-[10px] uppercase shadow-lg shadow-yellow-500/20"
+                   >
+                     Ver Plan de Pagos
+                   </button>
+                </div>
+              )}
+            </div>
+
+            <div className="p-8 border-t border-slate-800 flex justify-end bg-slate-900/50">
+              <button onClick={() => setShowDetailsModal(null)} className="bg-slate-800 px-8 py-3 rounded-xl font-bold text-sm">Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main Vehicle Edit/Create Modal */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-4xl shadow-2xl animate-in zoom-in-95 my-8">
+            <div className="p-8 border-b border-slate-800 flex justify-between items-center">
+              <h2 className="text-2xl font-bold">{editingVehicle ? 'Editar Vehículo' : 'Nuevo Vehículo'}</h2>
+              <button onClick={closeModal} className="text-slate-500 hover:text-white text-3xl">&times;</button>
+            </div>
+            <form onSubmit={handleSubmit} className="p-8 grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="space-y-6">
+                <h3 className="text-sm font-black text-blue-500 uppercase tracking-widest border-l-4 border-blue-500 pl-3">Datos Generales</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-slate-500 font-bold uppercase mb-1">Matrícula</label>
+                    <input required value={formData.plate} onChange={e => setFormData({...formData, plate: e.target.value.toUpperCase()})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 font-bold uppercase mb-1">Modelo</label>
+                    <input required value={formData.model} onChange={e => setFormData({...formData, model: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-slate-500 font-bold uppercase mb-1">Kilómetros Actuales</label>
+                    <input type="number" required value={formData.kilometers} onChange={e => setFormData({...formData, kilometers: parseInt(e.target.value)})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 font-bold uppercase mb-1">Consumo L/100</label>
+                    <input type="number" step="0.1" required value={formData.baseConsumption} onChange={e => setFormData({...formData, baseConsumption: parseFloat(e.target.value)})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-slate-500 font-bold uppercase mb-1">Fecha ITV</label>
+                    <input type="date" value={formData.itvDate} onChange={e => setFormData({...formData, itvDate: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 font-bold uppercase mb-1">Expiración Seguro</label>
+                    <input type="date" value={formData.insuranceExpiry} onChange={e => setFormData({...formData, insuranceExpiry: e.target.value})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                <h3 className="text-sm font-black text-yellow-500 uppercase tracking-widest border-l-4 border-yellow-500 pl-3">Financiación</h3>
+                <div className="flex items-center gap-3 p-4 bg-slate-800/50 rounded-2xl border border-slate-700">
+                  <input type="checkbox" checked={formData.loan?.active} onChange={e => setFormData({...formData, loan: {...formData.loan!, active: e.target.checked}})} className="w-5 h-5 rounded accent-yellow-500" />
+                  <span className="text-sm font-bold text-slate-300">Este vehículo tiene un préstamo activo</span>
+                </div>
+                {formData.loan?.active && (
+                  <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs text-slate-500 font-bold uppercase mb-1">Importe Total (€)</label>
+                        <input type="number" value={formData.loan.totalAmount} onChange={e => setFormData({...formData, loan: {...formData.loan!, totalAmount: parseFloat(e.target.value), remainingAmount: parseFloat(e.target.value)}})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 font-bold uppercase mb-1">Cuota Mensual (€)</label>
+                        <input type="number" value={formData.loan.monthlyFee} onChange={e => setFormData({...formData, loan: {...formData.loan!, monthlyFee: parseFloat(e.target.value)}})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs text-slate-500 font-bold uppercase mb-1">Fecha Inicio</label>
+                        <input type="date" value={formData.loan.startDate} onChange={e => setFormData({...formData, loan: {...formData.loan!, startDate: e.target.value}})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 font-bold uppercase mb-1">Fecha Fin</label>
+                        <input type="date" value={formData.loan.endDate} onChange={e => setFormData({...formData, loan: {...formData.loan!, endDate: e.target.value}})} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="md:col-span-2 flex gap-4 pt-4 border-t border-slate-800">
+                <button type="button" onClick={closeModal} className="flex-1 bg-slate-800 hover:bg-slate-700 py-4 rounded-2xl font-bold">Cancelar</button>
+                <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-bold shadow-lg shadow-blue-600/30">Guardar Cambios</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Loan Installments Modal ("Cotas") */}
       {showLoanModal && activeVehicleForLoan && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/95 backdrop-blur-md">
-          <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] w-full max-w-xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
-            <div className="p-8 border-b border-slate-800 flex justify-between items-center bg-slate-900/50 rounded-t-[2.5rem]">
+          <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] w-full max-w-xl shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="p-8 border-b border-slate-800 flex justify-between items-center">
               <div>
                 <h2 className="text-2xl font-black tracking-tight">Cotas de Préstamo</h2>
-                <p className="text-xs text-blue-400 font-bold uppercase tracking-widest">{activeVehicleForLoan.plate}</p>
+                <p className="text-xs text-blue-400 font-bold uppercase">{activeVehicleForLoan.plate}</p>
               </div>
               <button onClick={() => setShowLoanModal(null)} className="text-slate-500 hover:text-white text-4xl font-light">&times;</button>
             </div>
@@ -316,90 +440,60 @@ const Vehicles: React.FC<VehiclesProps> = ({ vehicles, setVehicles, isAdmin }) =
             <div className="p-8 overflow-y-auto space-y-4 flex-1">
               {isAdmin && (
                 <div className="mb-6 p-6 bg-blue-600/5 border border-blue-500/20 rounded-3xl space-y-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <Plus className="w-4 h-4 text-blue-400" />
-                      <h4 className="text-xs font-black uppercase tracking-widest text-blue-400">Acciones del Plan</h4>
-                    </div>
-                    {activeVehicleForLoan.loan.installments?.length ? (
-                      <button 
-                        onClick={() => clearInstallments(showLoanModal)}
-                        className="text-[9px] font-bold text-red-500 hover:text-red-400 flex items-center gap-1 uppercase"
-                      >
-                        <Trash2 className="w-3 h-3" /> Borrar Plan
-                      </button>
-                    ) : null}
-                  </div>
+                  <h4 className="text-[10px] font-black uppercase text-blue-400">Añadir Mensualidad</h4>
                   <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-[9px] text-slate-500 font-bold uppercase tracking-tighter">Fecha Cuota</label>
-                      <input type="date" value={newInsDate} onChange={e => setNewInsDate(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm outline-none focus:ring-1 focus:ring-blue-500" />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[9px] text-slate-500 font-bold uppercase tracking-tighter">Importe (€)</label>
-                      <input type="number" placeholder="Ej: 450" value={newInsAmount} onChange={e => setNewInsAmount(parseFloat(e.target.value))} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm outline-none focus:ring-1 focus:ring-blue-500" />
-                    </div>
+                    <input type="date" value={newInsDate} onChange={e => setNewInsDate(e.target.value)} className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm" />
+                    <input type="number" placeholder="Importe €" value={newInsAmount} onChange={e => setNewInsAmount(parseFloat(e.target.value))} className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm" />
                   </div>
-                  <button onClick={() => addManualInstallment(showLoanModal)} className="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold text-xs shadow-lg shadow-blue-600/20 transition-all active:scale-95">Añadir Mensualidad Manual</button>
+                  <button onClick={() => addManualInstallment(showLoanModal)} className="w-full bg-blue-600 py-3 rounded-xl font-bold text-xs">Añadir Cuota Manual</button>
                 </div>
               )}
 
               {activeVehicleForLoan.loan.installments?.length ? (
                 <div className="space-y-3">
                   {activeVehicleForLoan.loan.installments.map(ins => (
-                    <div key={ins.id} className={`p-5 rounded-3xl border transition-all flex items-center justify-between ${ins.paid ? 'bg-green-500/5 border-green-500/20 shadow-[0_0_15px_rgba(34,197,94,0.05)]' : 'bg-slate-800/50 border-slate-700'}`}>
+                    <div key={ins.id} className={`p-5 rounded-3xl border flex items-center justify-between ${ins.paid ? 'bg-green-500/5 border-green-500/20' : 'bg-slate-800/50 border-slate-700'}`}>
                       <div className="flex items-center gap-5">
                         <div className={`p-3 rounded-2xl ${ins.paid ? 'bg-green-500/10' : 'bg-slate-700'}`}>
                           <Calendar className={`w-5 h-5 ${ins.paid ? 'text-green-500' : 'text-slate-400'}`} />
                         </div>
                         <div>
                           <p className={`font-black text-lg ${ins.paid ? 'text-green-500/50 line-through' : 'text-slate-200'}`}>{ins.date}</p>
-                          <p className="text-sm text-slate-500 font-bold uppercase tracking-wider">{ins.amount.toLocaleString()} €</p>
+                          <p className="text-sm text-slate-500 font-bold">{ins.amount.toLocaleString()} €</p>
                         </div>
                       </div>
-                      {isAdmin && (
-                        <button 
-                          onClick={() => toggleInstallment(showLoanModal, ins.id)}
-                          className={`w-12 h-12 rounded-2xl transition-all flex items-center justify-center ${ins.paid ? 'bg-green-500 text-white shadow-lg shadow-green-500/20' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}
-                        >
-                          {ins.paid ? <CheckCircle2 className="w-6 h-6" /> : <div className="w-6 h-6 rounded-full border-2 border-slate-600" />}
-                        </button>
-                      )}
+                      <button 
+                        onClick={() => toggleInstallment(showLoanModal, ins.id)}
+                        className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${ins.paid ? 'bg-green-500 text-white' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}
+                      >
+                        {ins.paid ? <CheckCircle2 className="w-6 h-6" /> : <div className="w-6 h-6 rounded-full border-2 border-slate-600" />}
+                      </button>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="text-center py-12 space-y-6 bg-slate-800/20 rounded-[2.5rem] border border-dashed border-slate-800">
-                  <div className="w-20 h-20 bg-slate-900/50 rounded-full flex items-center justify-center mx-auto border border-slate-700">
-                    <AlertTriangle className="w-8 h-8 text-slate-600" />
-                  </div>
-                  <div className="space-y-2 px-8">
-                    <p className="text-slate-400 font-bold">Sin plan de pagos activo</p>
-                    <p className="text-xs text-slate-500 max-w-[250px] mx-auto italic">Todavía no se han generado las cotas para este préstamo.</p>
-                  </div>
-                  {isAdmin && (
-                    <button 
-                      onClick={() => generateInstallments(showLoanModal)}
-                      className="bg-blue-600 hover:bg-blue-500 px-8 py-3.5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-blue-600/20 transition-all active:scale-95 flex items-center gap-2 mx-auto"
-                    >
-                      <RefreshCw className="w-4 h-4" /> Generar Plan Automático
-                    </button>
-                  )}
+                <div className="text-center py-12 bg-slate-800/20 rounded-[2.5rem] border border-dashed border-slate-800">
+                  <AlertTriangle className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+                  <p className="text-slate-500 font-bold">Sin plan de pagos</p>
+                  <button 
+                    onClick={() => generateInstallments(showLoanModal)}
+                    className="mt-4 bg-blue-600 px-6 py-3 rounded-xl font-black text-xs uppercase"
+                  >
+                    Generar Automáticamente
+                  </button>
                 </div>
               )}
             </div>
             
             <div className="p-8 border-t border-slate-800 bg-slate-900/80 rounded-b-[2.5rem]">
                <div className="flex justify-between items-center">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Total Pendiente</span>
-                    <span className="text-2xl text-yellow-500 font-black">{activeVehicleForLoan.loan.remainingAmount.toLocaleString()} €</span>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase text-slate-500">Pendiente</span>
+                    <span className="text-2xl text-yellow-500 font-black block">{activeVehicleForLoan.loan.remainingAmount.toLocaleString()} €</span>
                   </div>
                   <div className="text-right">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 block">Pagado</span>
-                    <span className="text-lg text-green-500 font-bold">
-                      {(activeVehicleForLoan.loan.totalAmount - activeVehicleForLoan.loan.remainingAmount).toLocaleString()} €
-                    </span>
+                    <span className="text-[10px] font-bold uppercase text-slate-500">Total Crédito</span>
+                    <span className="text-lg text-slate-300 font-bold block">{activeVehicleForLoan.loan.totalAmount.toLocaleString()} €</span>
                   </div>
                </div>
             </div>

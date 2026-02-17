@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import { 
   TrendingUp, Fuel, Ruler, Wallet, User, HardHat, Truck, Navigation, 
-  ArrowUpRight, ArrowDownRight, Zap, Target, FileDown
+  ArrowUpRight, ArrowDownRight, Zap, Target, FileDown, Activity
 } from 'lucide-react';
 import { LogEntry, Vehicle, Worker, Work, TripType, PriceRecord } from '../types';
 
@@ -29,6 +29,9 @@ const Stats: React.FC<StatsProps> = ({ logs, vehicles, workers, works, priceHist
 
   // Logic to find applicable price for a date supporting intervals
   const getPriceForDate = (date: string) => {
+    const defaultPrice = { fuelPrice: 1.70, costPerKm: 0.15 };
+    if (!priceHistory || priceHistory.length === 0) return defaultPrice;
+
     const applicable = priceHistory.filter(p => {
       const startsBefore = p.date <= date;
       const endsAfter = !p.endDate || p.endDate >= date;
@@ -43,7 +46,7 @@ const Stats: React.FC<StatsProps> = ({ logs, vehicles, workers, works, priceHist
       .filter(p => p.date <= date)
       .sort((a, b) => b.date.localeCompare(a.date))[0];
 
-    return fallback || priceHistory[priceHistory.length - 1];
+    return fallback || priceHistory[priceHistory.length - 1] || defaultPrice;
   };
 
   // Basic Calculations
@@ -103,6 +106,21 @@ const Stats: React.FC<StatsProps> = ({ logs, vehicles, workers, works, priceHist
     return Object.values(stats).sort((a, b) => b.cost - a.cost);
   }, [logs, works, priceHistory]);
 
+  const vehicleStats = useMemo(() => {
+    const stats: Record<string, { name: string, model: string, distance: number, fuel: number, cost: number, count: number }> = {};
+    logs.forEach(log => {
+      const v = vehicles.find(v => v.id === log.vehicleId);
+      const name = v ? v.plate : 'Desconocido';
+      if (!stats[name]) stats[name] = { name, model: v?.model || '---', distance: 0, fuel: 0, cost: 0, count: 0 };
+      const price = getPriceForDate(log.date);
+      stats[name].distance += log.distance;
+      stats[name].fuel += log.fuelConsumed;
+      stats[name].cost += (log.fuelConsumed * price.fuelPrice) + (log.distance * price.costPerKm);
+      stats[name].count += 1;
+    });
+    return Object.values(stats).sort((a, b) => b.cost - a.cost);
+  }, [logs, vehicles, priceHistory]);
+
   const tripTypeStats = useMemo(() => {
     const stats: Record<string, { name: string, value: number, km: number }> = {};
     logs.forEach(log => {
@@ -146,22 +164,17 @@ const Stats: React.FC<StatsProps> = ({ logs, vehicles, workers, works, priceHist
     })));
     XLSX.utils.book_append_sheet(wb, workWs, "Por Obra");
 
-    // 4. Vehicle Stats (Simplified from vehicles list)
-    const vehicleSummary = vehicles.map(v => {
-      const vLogs = logs.filter(l => l.vehicleId === v.id);
-      const vKm = vLogs.reduce((acc, l) => acc + l.distance, 0);
-      const vFuel = vLogs.reduce((acc, l) => acc + l.fuelConsumed, 0);
-      return {
-        'Matrícula': v.plate,
-        'Modelo': v.model,
-        'KM Actuales': v.kilometers,
-        'KM en Periodo': vKm,
-        'Litros en Periodo': vFuel,
-        'Consumo Medio Real': vKm > 0 ? (vFuel/vKm)*100 : 0
-      };
-    });
-    const vehicleWs = XLSX.utils.json_to_sheet(vehicleSummary);
-    XLSX.utils.book_append_sheet(wb, vehicleWs, "Por Vehiculo");
+    // 4. Vehicle Stats
+    const vehicleWs = XLSX.utils.json_to_sheet(vehicleStats.map(v => ({
+      'Matrícula': v.name,
+      'Modelo': v.model,
+      'Viajes': v.count,
+      'KM Periodo': v.distance,
+      'Litros Periodo': v.fuel,
+      'Coste Real (€)': v.cost,
+      'Media Consumo': v.distance > 0 ? (v.fuel/v.distance)*100 : 0
+    })));
+    XLSX.utils.book_append_sheet(wb, vehicleWs, "Por Vehículo");
 
     XLSX.writeFile(wb, `Informe_Flota_Completo_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
@@ -388,6 +401,75 @@ const Stats: React.FC<StatsProps> = ({ logs, vehicles, workers, works, priceHist
                           style={{ width: `${(work.cost / totals.totalCost) * 100}%` }}
                         />
                       </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {view === 'vehicles' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Gráfica de Costes por Vehículo */}
+            <div className="lg:col-span-2 bg-slate-900/50 border border-slate-800 p-8 rounded-3xl shadow-2xl">
+              <div className="flex items-center justify-between mb-8">
+                <div>
+                  <h3 className="text-xl font-black tracking-tight">Coste Real por Unidad</h3>
+                  <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-1">Impacto financiero directo por matrícula</p>
+                </div>
+                <div className="bg-cyan-500/10 p-3 rounded-2xl">
+                  <Activity className="w-6 h-6 text-cyan-400" />
+                </div>
+              </div>
+              <div className="h-96">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={vehicleStats} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={false} />
+                    <XAxis type="number" stroke="#475569" fontSize={10} axisLine={false} />
+                    <YAxis dataKey="name" type="category" stroke="#94a3b8" fontSize={11} fontWeight="bold" axisLine={false} width={80} />
+                    <Tooltip 
+                      cursor={{fill: '#1e293b', opacity: 0.4}}
+                      contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '16px', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}
+                      formatter={(val: any) => [`${Number(val).toFixed(2)} €`, 'Coste Acumulado']}
+                    />
+                    <Bar dataKey="cost" name="Coste (€)" fill="#06b6d4" radius={[0, 8, 8, 0]} barSize={32} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Listado de eficiencia */}
+            <div className="bg-slate-900/50 border border-slate-800 p-8 rounded-3xl shadow-2xl">
+              <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
+                <Fuel className="w-5 h-5 text-cyan-400" />
+                Resumen de Gastos
+              </h3>
+              <div className="space-y-4">
+                {vehicleStats.map((v, i) => (
+                  <div key={i} className="p-5 bg-slate-800/20 border border-slate-800 rounded-2xl hover:border-cyan-500/30 transition-all group">
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <p className="text-sm font-black text-slate-100">{v.name}</p>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase">{v.model}</p>
+                      </div>
+                      <span className="text-sm font-black text-cyan-400">{v.cost.toFixed(2)} €</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="text-[10px] text-slate-500 font-bold">
+                        KM: <span className="text-slate-300">{v.distance.toLocaleString()}</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-bold text-right">
+                        LITROS: <span className="text-slate-300">{v.fuel.toFixed(1)}</span>
+                      </div>
+                    </div>
+                    <div className="mt-3 w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                      <div 
+                        className="bg-cyan-500 h-full" 
+                        style={{ width: `${(v.cost / Math.max(...vehicleStats.map(x => x.cost))) * 100}%` }}
+                      />
                     </div>
                   </div>
                 ))}

@@ -23,6 +23,9 @@ const Dashboard: React.FC<DashboardProps> = ({ vehicles, workers, works, logs, a
 
   // Logic to find applicable price for a date supporting intervals
   const getPriceForDate = (date: string) => {
+    const defaultPrice = { fuelPrice: 1.70, costPerKm: 0.15 };
+    if (!priceHistory || priceHistory.length === 0) return defaultPrice;
+
     // 1. Find exact interval matches
     const applicable = priceHistory.filter(p => {
       const startsBefore = p.date <= date;
@@ -40,7 +43,7 @@ const Dashboard: React.FC<DashboardProps> = ({ vehicles, workers, works, logs, a
       .filter(p => p.date <= date)
       .sort((a, b) => b.date.localeCompare(a.date))[0];
 
-    return fallback || priceHistory[priceHistory.length - 1];
+    return fallback || priceHistory[priceHistory.length - 1] || defaultPrice;
   };
 
   const totalCost = logs.reduce((acc, log) => {
@@ -51,7 +54,7 @@ const Dashboard: React.FC<DashboardProps> = ({ vehicles, workers, works, logs, a
   const totalFuel = logs.reduce((acc, log) => acc + log.fuelConsumed, 0).toFixed(1);
   const totalDist = logs.reduce((acc, log) => acc + log.distance, 0);
 
-  const activePrice = priceHistory[0]; // Assuming sorted desc in state
+  const activePrice = priceHistory.length > 0 ? priceHistory[0] : null; // Assuming sorted desc in state
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -155,7 +158,7 @@ const Dashboard: React.FC<DashboardProps> = ({ vehicles, workers, works, logs, a
                 <TrendingUp className="w-4 h-4" />
                 <span className="text-sm font-bold">{totalDist.toLocaleString()} km totales</span>
               </div>
-              <p className="text-xs text-slate-500 italic">Última tarifa: {activePrice?.fuelPrice.toFixed(3)}€/L</p>
+              <p className="text-xs text-slate-500 italic">Última tarifa: {activePrice?.fuelPrice?.toFixed(3) || '1.700'}€/L</p>
             </div>
           </div>
         </div>
